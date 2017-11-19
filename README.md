@@ -15,3 +15,8 @@ Then install `ContinuousDPs.jl` by
 ```jl
 Pkg.clone("https://github.com/QuantEcon/ContinuousDPs.jl")
 ```
+
+## Demo Notebooks
+
+* [Stochastic optimal growth model](http://nbviewer.jupyter.org/github/QuantEcon/ContinuousDPs.jl/blob/master/examples/cdp_ex_optgrowth_jl.ipynb)
+* [Examples from Miranda and Fackler 2002, Chapter 9](http://nbviewer.jupyter.org/github/QuantEcon/ContinuousDPs.jl/blob/master/examples/cdp_ex_MF_jl.ipynb)
