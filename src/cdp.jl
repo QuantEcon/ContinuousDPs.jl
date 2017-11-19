@@ -16,9 +16,9 @@ import Optim
 
 #= Types and contructors =#
 
-struct Interp{N,TM<:AbstractMatrix,TL<:Factorization}
+struct Interp{N,TS<:VecOrMat,TM<:AbstractMatrix,TL<:Factorization}
     basis::Basis{N}
-    S::Array{Float64,N}
+    S::TS
     Scoord::NTuple{N,Vector{Float64}}
     length::Int
     size::NTuple{N,Int}
@@ -40,7 +40,7 @@ function Interp(basis::Basis)
 end
 
 
-struct ContinuousDP{N,K}
+mutable struct ContinuousDP{N,K}
     f::Function
     g::Function
     discount::Float64
@@ -61,8 +61,8 @@ function ContinuousDP(f::Function, g::Function, discount::Float64,
 end
 
 
-mutable struct CDPSolveResult{Algo<:DPAlgorithm,N}
-    cdp::ContinuousDP
+mutable struct CDPSolveResult{Algo<:DPAlgorithm,N,K}
+    cdp::ContinuousDP{N,K}
     tol::Float64
     max_iter::Int
     C::Vector{Float64}
@@ -73,8 +73,8 @@ mutable struct CDPSolveResult{Algo<:DPAlgorithm,N}
     X::Vector{Float64}
     resid::Vector{Float64}
 
-    function CDPSolveResult{Algo,N}(cdp::ContinuousDP, tol::Float64,
-                                    max_iter::Integer) where {Algo,N}
+    function CDPSolveResult{Algo,N,K}(cdp::ContinuousDP, tol::Float64,
+                                      max_iter::Integer) where {Algo,N,K}
         C = zeros(cdp.interp.length)
         converged = false
         num_iter = 0
@@ -82,8 +82,8 @@ mutable struct CDPSolveResult{Algo<:DPAlgorithm,N}
         V = Float64[]
         X = Float64[]
         resid = Float64[]
-        res = new{Algo,N}(cdp, tol, max_iter, C, converged, num_iter,
-                          eval_nodes, V, X, resid)
+        res = new{Algo,N,K}(cdp, tol, max_iter, C, converged, num_iter,
+                            eval_nodes, V, X, resid)
         return res
     end
 end
@@ -260,11 +260,11 @@ end
 
 #= Solve methods =#
 
-function solve(cdp::ContinuousDP{N}, method::Type{Algo}=PFI;
+function solve(cdp::ContinuousDP{N,K}, method::Type{Algo}=PFI;
                tol::Real=sqrt(eps()), max_iter::Integer=500,
-               verbose::Int=2, print_skip::Int=50) where {Algo<:DPAlgorithm,N}
+               verbose::Int=2, print_skip::Int=50) where {Algo<:DPAlgorithm,N,K}
     tol = Float64(tol)
-    res = CDPSolveResult{Algo,N}(cdp, tol, max_iter)
+    res = CDPSolveResult{Algo,N,K}(cdp, tol, max_iter)
     _solve!(cdp, res, verbose, print_skip)
     evaluate!(res)
     return res
@@ -299,12 +299,54 @@ end
 
 #= Simulate methods =#
 
-#=
-function simulate(res::CDPSolveResult, s_init::Real, ts_length::Integer)
+function simulate!(rng::AbstractRNG, s_path::VecOrMat{Float64},
+                   res::CDPSolveResult, s_init)
     N = ndims(res)
-    N != 1 && error("Not implemented")
+    N == 1 || error("not implemented yet for multidimensional states")
 
-    out = Array{Float64}(ts_length)
-    out[1] = s_init
-=#
+    ts_length = size(s_path)[end]
+    cdf = cumsum(res.cdp.weights)
+    r = rand(rng, ts_length-1)
+    e_ind = Array{Int}(ts_length-1)
+    for t in 1:ts_length-1
+        e_ind[t] = searchsortedlast(cdf, r[t]) + 1
+    end
 
+    X_interp = LinInterp(res.eval_nodes, res.X)  # Only for 1dim states
+    s_ind_front = Base.front(indices(s_path))
+    e_ind_tail = Base.tail(indices(res.cdp.shocks))
+    s_path[(s_ind_front..., 1)...] = s_init
+    for t in 1:ts_length-1
+        s = s_path[(s_ind_front..., t)...]
+        e = res.cdp.shocks[(e_ind[t], e_ind_tail...)...]
+        s_path[t+1] = res.cdp.g(s, X_interp(s), e)
+    end
+
+    return s_path
+end
+
+simulate!(s_path::VecOrMat{Float64}, res::CDPSolveResult, s_init) =
+    simulate!(Base.GLOBAL_RNG, s_path, res, s_init)
+
+
+function simulate(rng::AbstractRNG, res::CDPSolveResult{Algo,1}, s_init::Real,
+                  ts_length::Integer) where {Algo<:DPAlgorithm}
+    s_path = Array{Float64}(ts_length)
+    simulate!(rng, s_path, res, s_init)
+    return s_path
+end
+
+simulate(res::CDPSolveResult{Algo,1}, s_init::Real,
+         ts_length::Integer) where {Algo<:DPAlgorithm} =
+    simulate(Base.GLOBAL_RNG, res, s_init, ts_length)
+
+
+function simulate(rng::AbstractRNG, res::CDPSolveResult, s_init::Vector,
+                  ts_length::Integer)
+    s_path = Array{Float64}(length(s_init), ts_length)
+    simulate!(rng, s_path, res, s_init)
+    return s_path
+end
+
+simulate(res::CDPSolveResult, s_init::Vector, ts_length::Integer) =
+    simulate(Base.GLOBAL_RNG, res, s_init, ts_length)
