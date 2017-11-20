@@ -61,20 +61,20 @@ function ContinuousDP(f::Function, g::Function, discount::Float64,
 end
 
 
-mutable struct CDPSolveResult{Algo<:DPAlgorithm,N,K}
+mutable struct CDPSolveResult{Algo<:DPAlgorithm,N,K,TS<:VecOrMat}
     cdp::ContinuousDP{N,K}
     tol::Float64
     max_iter::Int
     C::Vector{Float64}
     converged::Bool
     num_iter::Int
-    eval_nodes::Array{Float64,N}
+    eval_nodes::TS
     V::Vector{Float64}
     X::Vector{Float64}
     resid::Vector{Float64}
 
-    function CDPSolveResult{Algo,N,K}(cdp::ContinuousDP, tol::Float64,
-                                      max_iter::Integer) where {Algo,N,K}
+    function CDPSolveResult{Algo,N,K,TS}(cdp::ContinuousDP, tol::Float64,
+                                         max_iter::Integer) where {Algo,N,K,TS}
         C = zeros(cdp.interp.length)
         converged = false
         num_iter = 0
@@ -82,8 +82,8 @@ mutable struct CDPSolveResult{Algo<:DPAlgorithm,N,K}
         V = Float64[]
         X = Float64[]
         resid = Float64[]
-        res = new{Algo,N,K}(cdp, tol, max_iter, C, converged, num_iter,
-                            eval_nodes, V, X, resid)
+        res = new{Algo,N,K,TS}(cdp, tol, max_iter, C, converged, num_iter,
+                               eval_nodes, V, X, resid)
         return res
     end
 end
@@ -264,7 +264,7 @@ function solve(cdp::ContinuousDP{N,K}, method::Type{Algo}=PFI;
                tol::Real=sqrt(eps()), max_iter::Integer=500,
                verbose::Int=2, print_skip::Int=50) where {Algo<:DPAlgorithm,N,K}
     tol = Float64(tol)
-    res = CDPSolveResult{Algo,N,K}(cdp, tol, max_iter)
+    res = CDPSolveResult{Algo,N,K,typeof(cdp.interp.S)}(cdp, tol, max_iter)
     _solve!(cdp, res, verbose, print_skip)
     evaluate!(res)
     return res
