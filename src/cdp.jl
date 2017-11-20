@@ -40,11 +40,11 @@ function Interp(basis::Basis)
 end
 
 
-mutable struct ContinuousDP{N,K,TS<:VecOrMat}
+mutable struct ContinuousDP{N,TR<:AbstractArray,TS<:VecOrMat}
     f::Function
     g::Function
     discount::Float64
-    shocks::Array{Float64,K}
+    shocks::TR
     weights::Vector{Float64}
     x_lb::Function
     x_ub::Function
@@ -61,8 +61,8 @@ function ContinuousDP(f::Function, g::Function, discount::Float64,
 end
 
 
-mutable struct CDPSolveResult{Algo<:DPAlgorithm,N,K,TS<:VecOrMat}
-    cdp::ContinuousDP{N,K,TS}
+mutable struct CDPSolveResult{Algo<:DPAlgorithm,N,TR<:AbstractArray,TS<:VecOrMat}
+    cdp::ContinuousDP{N,TR,TS}
     tol::Float64
     max_iter::Int
     C::Vector{Float64}
@@ -73,9 +73,9 @@ mutable struct CDPSolveResult{Algo<:DPAlgorithm,N,K,TS<:VecOrMat}
     X::Vector{Float64}
     resid::Vector{Float64}
 
-    function CDPSolveResult{Algo,N,K,TS}(cdp::ContinuousDP{N,K,TS},
-                                         tol::Float64,
-                                         max_iter::Integer) where {Algo,N,K,TS}
+    function CDPSolveResult{Algo,N,TR,TS}(
+            cdp::ContinuousDP{N,TR,TS}, tol::Float64, max_iter::Integer
+        ) where {Algo,N,TR,TS}
         C = zeros(cdp.interp.length)
         converged = false
         num_iter = 0
@@ -83,8 +83,8 @@ mutable struct CDPSolveResult{Algo<:DPAlgorithm,N,K,TS<:VecOrMat}
         V = Float64[]
         X = Float64[]
         resid = Float64[]
-        res = new{Algo,N,K,TS}(cdp, tol, max_iter, C, converged, num_iter,
-                               eval_nodes, V, X, resid)
+        res = new{Algo,N,TR,TS}(cdp, tol, max_iter, C, converged, num_iter,
+                                eval_nodes, V, X, resid)
         return res
     end
 end
@@ -261,12 +261,12 @@ end
 
 #= Solve methods =#
 
-function solve(cdp::ContinuousDP{N,K,TS}, method::Type{Algo}=PFI;
+function solve(cdp::ContinuousDP{N,TR,TS}, method::Type{Algo}=PFI;
                tol::Real=sqrt(eps()), max_iter::Integer=500,
                verbose::Int=2,
-               print_skip::Int=50) where {Algo<:DPAlgorithm,N,K,TS}
+               print_skip::Int=50) where {Algo<:DPAlgorithm,N,TR,TS}
     tol = Float64(tol)
-    res = CDPSolveResult{Algo,N,K,TS}(cdp, tol, max_iter)
+    res = CDPSolveResult{Algo,N,TR,TS}(cdp, tol, max_iter)
     _solve!(cdp, res, verbose, print_skip)
     evaluate!(res)
     return res
@@ -302,8 +302,8 @@ end
 #= Simulate methods =#
 
 function simulate!(rng::AbstractRNG, s_path::TS,
-                   res::CDPSolveResult{Algo,N,K,TS},
-                   s_init) where {Algo,N,K,TS<:VecOrMat}
+                   res::CDPSolveResult{Algo,N,TR,TS},
+                   s_init) where {Algo,N,TR,TS<:VecOrMat}
     ts_length = size(s_path)[end]
     cdf = cumsum(res.cdp.weights)
     r = rand(rng, ts_length-1)
