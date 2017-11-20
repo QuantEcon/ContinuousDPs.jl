@@ -40,7 +40,7 @@ function Interp(basis::Basis)
 end
 
 
-mutable struct ContinuousDP{N,K}
+mutable struct ContinuousDP{N,K,TS<:VecOrMat}
     f::Function
     g::Function
     discount::Float64
@@ -48,7 +48,7 @@ mutable struct ContinuousDP{N,K}
     weights::Vector{Float64}
     x_lb::Function
     x_ub::Function
-    interp::Interp{N}
+    interp::Interp{N,TS}
 end
 
 function ContinuousDP(f::Function, g::Function, discount::Float64,
@@ -62,7 +62,7 @@ end
 
 
 mutable struct CDPSolveResult{Algo<:DPAlgorithm,N,K,TS<:VecOrMat}
-    cdp::ContinuousDP{N,K}
+    cdp::ContinuousDP{N,K,TS}
     tol::Float64
     max_iter::Int
     C::Vector{Float64}
@@ -73,7 +73,8 @@ mutable struct CDPSolveResult{Algo<:DPAlgorithm,N,K,TS<:VecOrMat}
     X::Vector{Float64}
     resid::Vector{Float64}
 
-    function CDPSolveResult{Algo,N,K,TS}(cdp::ContinuousDP, tol::Float64,
+    function CDPSolveResult{Algo,N,K,TS}(cdp::ContinuousDP{N,K,TS},
+                                         tol::Float64,
                                          max_iter::Integer) where {Algo,N,K,TS}
         C = zeros(cdp.interp.length)
         converged = false
@@ -260,11 +261,12 @@ end
 
 #= Solve methods =#
 
-function solve(cdp::ContinuousDP{N,K}, method::Type{Algo}=PFI;
+function solve(cdp::ContinuousDP{N,K,TS}, method::Type{Algo}=PFI;
                tol::Real=sqrt(eps()), max_iter::Integer=500,
-               verbose::Int=2, print_skip::Int=50) where {Algo<:DPAlgorithm,N,K}
+               verbose::Int=2,
+               print_skip::Int=50) where {Algo<:DPAlgorithm,N,K,TS}
     tol = Float64(tol)
-    res = CDPSolveResult{Algo,N,K,typeof(cdp.interp.S)}(cdp, tol, max_iter)
+    res = CDPSolveResult{Algo,N,K,TS}(cdp, tol, max_iter)
     _solve!(cdp, res, verbose, print_skip)
     evaluate!(res)
     return res
@@ -299,11 +301,9 @@ end
 
 #= Simulate methods =#
 
-function simulate!(rng::AbstractRNG, s_path::VecOrMat{Float64},
-                   res::CDPSolveResult, s_init)
-    N = ndims(res)
-    N == 1 || error("not implemented yet for multidimensional states")
-
+function simulate!(rng::AbstractRNG, s_path::TS,
+                   res::CDPSolveResult{Algo,N,K,TS},
+                   s_init) where {Algo,N,K,TS<:VecOrMat}
     ts_length = size(s_path)[end]
     cdf = cumsum(res.cdp.weights)
     r = rand(rng, ts_length-1)
