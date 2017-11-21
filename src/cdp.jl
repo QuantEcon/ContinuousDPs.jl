@@ -40,14 +40,14 @@ function Interp(basis::Basis)
 end
 
 
-mutable struct ContinuousDP{N,TR<:AbstractArray,TS<:VecOrMat}
-    f::Function
-    g::Function
+mutable struct ContinuousDP{N,TR<:AbstractArray,TS<:VecOrMat,Tf<:Function,Tg<:Function,Tlb<:Function,Tub<:Function}
+    f::Tf
+    g::Tg
     discount::Float64
     shocks::TR
     weights::Vector{Float64}
-    x_lb::Function
-    x_ub::Function
+    x_lb::Tlb
+    x_ub::Tub
     interp::Interp{N,TS}
 end
 
@@ -145,17 +145,15 @@ end
 #= Methods =#
 
 function _s_wise_max(cdp::ContinuousDP, s, C)
+    sp = Array{Float64}(size(cdp.shocks, 1), length(s))
     function objective(x)
-        out = 0.
-        t = Base.tail(indices(cdp.shocks))
-        for (i, w) in enumerate(cdp.weights)
-            e = cdp.shocks[(i, t...)...]
-            out += w * funeval(C, cdp.interp.basis, cdp.g(s, x, e))
+        for i in 1:size(sp, 1)
+            sp[i, :] = cdp.g(s, x, cdp.shocks[i, :])
         end
-        out *= cdp.discount
-        out += cdp.f(s, x)
-        out *= -1
-        return out
+        Vp = funeval(C, cdp.interp.basis, sp)
+        cont = cdp.discount * dot(cdp.weights, Vp)
+        flow = cdp.f(s, x)
+        -1*(flow + cont)
     end
     res = Optim.optimize(objective, cdp.x_lb(s), cdp.x_ub(s))
     v = -res.minimum::Float64
