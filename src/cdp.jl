@@ -69,6 +69,7 @@ mutable struct CDPSolveResult{Algo<:DPAlgorithm,N,TR<:AbstractArray,TS<:VecOrMat
     converged::Bool
     num_iter::Int
     eval_nodes::TS
+    eval_nodes_coord::NTuple{N,Vector{Float64}}
     V::Vector{Float64}
     X::Vector{Float64}
     resid::Vector{Float64}
@@ -80,11 +81,12 @@ mutable struct CDPSolveResult{Algo<:DPAlgorithm,N,TR<:AbstractArray,TS<:VecOrMat
         converged = false
         num_iter = 0
         eval_nodes = cdp.interp.S
+        eval_nodes_coord = cdp.interp.Scoord
         V = Float64[]
         X = Float64[]
         resid = Float64[]
         res = new{Algo,N,TR,TS}(cdp, tol, max_iter, C, converged, num_iter,
-                                eval_nodes, V, X, resid)
+                                eval_nodes, eval_nodes_coord, V, X, resid)
         return res
     end
 end
