@@ -101,13 +101,38 @@ function evaluate!(res::CDPSolveResult)
     return res
 end
 
-function set_eval_nodes!(res::CDPSolveResult, s_nodes::Array{Float64})
+function set_eval_nodes!(
+        res::CDPSolveResult{Algo,1}, s_nodes_coord::NTuple{1,Vector{Float64}}
+    ) where {Algo}
+    s_nodes = s_nodes_coord[1]
     res.eval_nodes = s_nodes
+    res.eval_nodes_coord = s_nodes_coord
     evaluate!(res)
 end
 
-set_eval_nodes!(res::CDPSolveResult, s_nodes::AbstractArray) =
-    set_eval_nodes!(res, collect(Float64, s_nodes))
+function set_eval_nodes!(
+        res::CDPSolveResult{Algo,N}, s_nodes_coord::NTuple{N,Vector{Float64}}
+    ) where {Algo,N}
+    s_nodes = gridmake(s_nodes_coord...)
+    res.eval_nodes = s_nodes
+    res.eval_nodes_coord = s_nodes_coord
+    evaluate!(res)
+end
+
+function set_eval_nodes!(
+        res::CDPSolveResult{Algo,N}, s_nodes_coord::NTuple{N,AbstractVector}
+    ) where {Algo,N}
+    T = Float64
+    s_nodes_coord_vecs =
+        ntuple(i -> collect(T, s_nodes_coord[i]), N)::NTuple{N,Vector{T}}
+    set_eval_nodes!(res, s_nodes_coord_vecs)
+end
+
+function set_eval_nodes!(
+        res::CDPSolveResult{Algo,N}, s_nodes_coord::Vararg{AbstractVector,N}
+    ) where {Algo,N}
+    set_eval_nodes!(res, s_nodes_coord)
+end
 
 function (res::CDPSolveResult)(s_nodes::AbstractArray{Float64})
     cdp, C = res.cdp, res.C
