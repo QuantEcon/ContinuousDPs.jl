@@ -339,14 +339,17 @@ function simulate!(rng::AbstractRNG, s_path::TS,
         e_ind[t] = searchsortedlast(cdf, r[t]) + 1
     end
 
-    X_interp = LinInterp(res.eval_nodes, res.X)  # Only for 1dim states
+    basis = Basis(map(LinParams, res.eval_nodes_coord, ntuple(i -> 0, N)))
+    X_interp = Interpoland(basis, res.X)
+
     s_ind_front = Base.front(indices(s_path))
     e_ind_tail = Base.tail(indices(res.cdp.shocks))
     s_path[(s_ind_front..., 1)...] = s_init
     for t in 1:ts_length-1
         s = s_path[(s_ind_front..., t)...]
+        x = X_interp(s)
         e = res.cdp.shocks[(e_ind[t], e_ind_tail...)...]
-        s_path[t+1] = res.cdp.g(s, X_interp(s), e)
+        s_path[(s_ind_front..., t+1)...] = res.cdp.g(s, x, e)
     end
 
     return s_path
