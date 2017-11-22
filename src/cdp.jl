@@ -40,7 +40,9 @@ function Interp(basis::Basis)
 end
 
 
-mutable struct ContinuousDP{N,TR<:AbstractArray,TS<:VecOrMat,Tf<:Function,Tg<:Function,Tlb<:Function,Tub<:Function}
+mutable struct ContinuousDP{N,TR<:AbstractVecOrMat,TS<:VecOrMat,
+                            Tf<:Function,Tg<:Function,
+                            Tlb<:Function,Tub<:Function}
     f::Tf
     g::Tg
     discount::Float64
@@ -61,7 +63,8 @@ function ContinuousDP(f::Function, g::Function, discount::Float64,
 end
 
 
-mutable struct CDPSolveResult{Algo<:DPAlgorithm,N,TR<:AbstractArray,TS<:VecOrMat}
+mutable struct CDPSolveResult{Algo<:DPAlgorithm,N,
+                              TR<:AbstractVecOrMat,TS<:VecOrMat}
     cdp::ContinuousDP{N,TR,TS}
     tol::Float64
     max_iter::Int
