@@ -3,17 +3,10 @@ Routines for solving continuous state dynamic programs by the Bellman equation c
 
 ## Installation
 
-This package at the moment depends on the `master` version of `BasisMatrices.jl`:
+To install the package, open the Julia package manager (Pkg) and type
 
-```jl
-Pkg.add("BasisMatrices");
-Pkg.checkout("BasisMatrices", "master")
 ```
-
-Then install `ContinuousDPs.jl` by
-
-```jl
-Pkg.clone("https://github.com/QuantEcon/ContinuousDPs.jl")
+add https://github.com/QuantEcon/ContinuousDPs.jl
 ```
 
 ## Demo Notebooks
