@@ -34,7 +34,7 @@ function Interp(basis::Basis)
     grid_size = size(basis)
     grid_lb, grid_ub = min(basis), max(basis)
     Phi = BasisMatrix(basis, Expanded(), S).vals[1]
-    Phi_lu = lufact(Phi)
+    Phi_lu = lu(Phi)
     interp = Interp(basis, S, Scoord, grid_length, grid_size, grid_lb, grid_ub,
                     Phi, Phi_lu)
 end
@@ -148,10 +148,10 @@ end
 #= Methods =#
 
 function _s_wise_max(cdp::ContinuousDP, s, C)
-    sp = Array{Float64}(size(cdp.shocks, 1), length(s))
+    sp = Array{Float64}(undef, size(cdp.shocks, 1), length(s))
     function objective(x)
         for i in 1:size(sp, 1)
-            sp[i, :] = cdp.g(s, x, cdp.shocks[i, :])
+            sp[i, :] .= cdp.g(s, x, cdp.shocks[i, :])
         end
         Vp = funeval(C, cdp.interp.basis, sp)
         cont = cdp.discount * dot(cdp.weights, Vp)
@@ -167,7 +167,7 @@ end
 function s_wise_max!(cdp::ContinuousDP, ss::AbstractArray{Float64},
                      C::Vector{Float64}, Tv::Vector{Float64})
     n = size(ss, 1)
-    t = Base.tail(indices(ss))
+    t = Base.tail(axes(ss))
     for i in 1:n
         Tv[i], _ = _s_wise_max(cdp, ss[(i, t...)...], C)
     end
@@ -178,7 +178,7 @@ function s_wise_max!(cdp::ContinuousDP, ss::AbstractArray{Float64},
                      C::Vector{Float64}, Tv::Vector{Float64},
                      X::Vector{Float64})
     n = size(ss, 1)
-    t = Base.tail(indices(ss))
+    t = Base.tail(axes(ss))
     for i in 1:n
         Tv[i], X[i] = _s_wise_max(cdp, ss[(i, t...)...], C)
     end
@@ -188,7 +188,7 @@ end
 function s_wise_max(cdp::ContinuousDP, ss::AbstractArray{Float64},
                     C::Vector{Float64})
     n = size(ss, 1)
-    Tv, X = Array{Float64}(n), Array{Float64}(n)
+    Tv, X = Array{Float64}(undef, n), Array{Float64}(undef, n)
     s_wise_max!(cdp, ss, C, Tv, X)
 end
 
@@ -196,7 +196,7 @@ end
 function bellman_operator!(cdp::ContinuousDP, C::Vector{Float64},
                            Tv::Vector{Float64})
     Tv = s_wise_max!(cdp, cdp.interp.S, C, Tv)
-    A_ldiv_B!(C, cdp.interp.Phi_lu, Tv)
+    ldiv!(C, cdp.interp.Phi_lu, Tv)
     return C
 end
 
@@ -204,7 +204,7 @@ end
 function compute_greedy!(cdp::ContinuousDP, ss::AbstractArray{Float64},
                          C::Vector{Float64}, X::Vector{Float64})
     n = size(ss, 1)
-    t = Base.tail(indices(ss))
+    t = Base.tail(axes(ss))
     for i in 1:n
         _, X[i] = _s_wise_max(cdp, ss[(i, t...)...], C)
     end
@@ -218,9 +218,9 @@ compute_greedy!(cdp::ContinuousDP, C::Vector{Float64}, X::Vector{Float64}) =
 function evaluate_policy!(cdp::ContinuousDP{N}, X::Vector{Float64},
                           C::Vector{Float64}) where N
     n = size(cdp.interp.S, 1)
-    ts = Base.tail(indices(cdp.interp.S))
-    te = Base.tail(indices(cdp.shocks))
-    A = Array{Float64}(n, n)
+    ts = Base.tail(axes(cdp.interp.S))
+    te = Base.tail(axes(cdp.shocks))
+    A = Array{Float64}(undef, n, n)
     A[:] = cdp.interp.Phi
     for i in 1:n
         s = cdp.interp.S[(i, ts...)...]
@@ -233,12 +233,12 @@ function evaluate_policy!(cdp::ContinuousDP{N}, X::Vector{Float64},
             ) * cdp.discount * w
         end
     end
-    A_lu = lufact(A)
+    A_lu = lu(A)
     for i in 1:n
         s = cdp.interp.S[(i, ts...)...]
         C[i] = cdp.f(s, X[i])
     end
-    A_ldiv_B!(A_lu, C)
+    ldiv!(A_lu, C)
     return C
 end
 
@@ -258,7 +258,7 @@ function operator_iteration!(T::Function, C::TC, tol::Float64, max_iter;
     err = tol + 1
     C_old = similar(C)
     while true
-        copy!(C_old, C)
+        copyto!(C_old, C)
         C = T(C)::TC
         err = maximum(abs, C - C_old)
         i += 1
@@ -305,7 +305,7 @@ end
 function _solve!(cdp::ContinuousDP, res::CDPSolveResult{PFI},
                  verbose, print_skip)
     C = res.C
-    X = Array{Float64}(cdp.interp.length)
+    X = Array{Float64}(undef, cdp.interp.length)
     operator!(C) = policy_iteration_operator!(cdp, C, X)
     res.converged, res.num_iter =
         operator_iteration!(operator!, res.C, res.tol, res.max_iter,
@@ -318,7 +318,7 @@ end
 function _solve!(cdp::ContinuousDP, res::CDPSolveResult{VFI},
                  verbose, print_skip)
     C = res.C
-    Tv = Array{Float64}(cdp.interp.length)
+    Tv = Array{Float64}(undef, cdp.interp.length)
     operator!(C) = bellman_operator!(cdp, C, Tv)
     res.converged, res.num_iter =
         operator_iteration!(operator!, res.C, res.tol, res.max_iter,
@@ -335,7 +335,7 @@ function simulate!(rng::AbstractRNG, s_path::TS,
     ts_length = size(s_path)[end]
     cdf = cumsum(res.cdp.weights)
     r = rand(rng, ts_length-1)
-    e_ind = Array{Int}(ts_length-1)
+    e_ind = Array{Int}(undef, ts_length-1)
     for t in 1:ts_length-1
         e_ind[t] = searchsortedlast(cdf, r[t]) + 1
     end
@@ -343,8 +343,8 @@ function simulate!(rng::AbstractRNG, s_path::TS,
     basis = Basis(map(LinParams, res.eval_nodes_coord, ntuple(i -> 0, N)))
     X_interp = Interpoland(basis, res.X)
 
-    s_ind_front = Base.front(indices(s_path))
-    e_ind_tail = Base.tail(indices(res.cdp.shocks))
+    s_ind_front = Base.front(axes(s_path))
+    e_ind_tail = Base.tail(axes(res.cdp.shocks))
     s_path[(s_ind_front..., 1)...] = s_init
     for t in 1:ts_length-1
         s = s_path[(s_ind_front..., t)...]
@@ -357,27 +357,27 @@ function simulate!(rng::AbstractRNG, s_path::TS,
 end
 
 simulate!(s_path::VecOrMat{Float64}, res::CDPSolveResult, s_init) =
-    simulate!(Base.GLOBAL_RNG, s_path, res, s_init)
+    simulate!(Random.GLOBAL_RNG, s_path, res, s_init)
 
 
 function simulate(rng::AbstractRNG, res::CDPSolveResult{Algo,1}, s_init::Real,
                   ts_length::Integer) where {Algo<:DPAlgorithm}
-    s_path = Array{Float64}(ts_length)
+    s_path = Array{Float64}(undef, ts_length)
     simulate!(rng, s_path, res, s_init)
     return s_path
 end
 
 simulate(res::CDPSolveResult{Algo,1}, s_init::Real,
          ts_length::Integer) where {Algo<:DPAlgorithm} =
-    simulate(Base.GLOBAL_RNG, res, s_init, ts_length)
+    simulate(Random.GLOBAL_RNG, res, s_init, ts_length)
 
 
 function simulate(rng::AbstractRNG, res::CDPSolveResult, s_init::Vector,
                   ts_length::Integer)
-    s_path = Array{Float64}(length(s_init), ts_length)
+    s_path = Array{Float64}(undef, length(s_init), ts_length)
     simulate!(rng, s_path, res, s_init)
     return s_path
 end
 
 simulate(res::CDPSolveResult, s_init::Vector, ts_length::Integer) =
-    simulate(Base.GLOBAL_RNG, res, s_init, ts_length)
+    simulate(Random.GLOBAL_RNG, res, s_init, ts_length)

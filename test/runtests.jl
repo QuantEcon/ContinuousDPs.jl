@@ -1,6 +1,6 @@
 using ContinuousDPs
 using QuantEcon
 using BasisMatrices
-using Base.Test
+using Test
 
 include("test_cdp.jl")

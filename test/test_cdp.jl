@@ -20,7 +20,7 @@
         # Analytical state path
         s_init = 0.1
         ts_length = 25
-        s_path_star = Array{Float64}(ts_length)
+        s_path_star = Array{Float64}(undef, ts_length)
         s_path_star[1] = s_init
         shock = 1.  # Arbitrary
         for t in 1:ts_length-1
@@ -59,7 +59,7 @@
 
                 # set_eval_nodes!
                 grid_size = 200
-                eval_nodes = collect(linspace(s_min, s_max, grid_size))
+                eval_nodes = collect(range(s_min, stop=s_max, length=grid_size))
                 set_eval_nodes!(res, eval_nodes);
 
                 # simulate
