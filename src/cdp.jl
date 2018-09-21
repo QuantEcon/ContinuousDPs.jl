@@ -151,7 +151,7 @@ function _s_wise_max(cdp::ContinuousDP, s, C)
     sp = Array{Float64}(undef, size(cdp.shocks, 1), length(s))
     function objective(x)
         for i in 1:size(sp, 1)
-            sp[i, :] .= cdp.g(s, x, cdp.shocks[i, :])
+            sp[i, :] .= cdp.g(s, x, cdp.shocks[i, axes(cdp.shocks)[2:end]...])
         end
         Vp = funeval(C, cdp.interp.basis, sp)
         cont = cdp.discount * dot(cdp.weights, Vp)
