@@ -147,6 +147,17 @@ end
 
 #= Methods =#
 
+@doc doc"""
+Compute optimal value for each grid
+##### Arguments
+- `cdp::ContinuousDP`: Object that contains the Model Parameters
+- `ss::AbstractArray{Float64}`: Interpolation nodes
+- `C::Vector{Float64}`: Basis coefficients
+- `Tv::Vector{Float64}`: A buffer array to hold the updated value function. Initial value not used and will be overwritten
+##### Returns
+- `v::Vector{Float64}`: Updated value function vector
+- `x::Vector{Float64}`: Updated policy function vector
+"""
 function _s_wise_max(cdp::ContinuousDP, s, C)
     sp = Array{Float64}(undef, size(cdp.shocks, 1), length(s))
     function objective(x)
@@ -164,6 +175,16 @@ function _s_wise_max(cdp::ContinuousDP, s, C)
     return v, x
 end
 
+@doc doc"""
+Call optimization function for value function iteration.
+##### Arguments
+- `cdp::ContinuousDP`: Object that contains the Model Parameters
+- `ss::AbstractArray{Float64}`: interpolation nodes
+- `C::Vector{Float64}`: Basis coefficients
+- `Tv::Vector{Float64}`: A buffer array to hold the updated value function. Initial value not used and will be overwritten.
+##### Returns
+- `Tv::typeof(Tv)`: Updated value function vector
+"""
 function s_wise_max!(cdp::ContinuousDP, ss::AbstractArray{Float64},
                      C::Vector{Float64}, Tv::Vector{Float64})
     n = size(ss, 1)
@@ -174,6 +195,18 @@ function s_wise_max!(cdp::ContinuousDP, ss::AbstractArray{Float64},
     return Tv
 end
 
+@doc doc"""
+Call optimization function for value function iteration.
+##### Arguments
+- `cdp::ContinuousDP`: Object that contains the Model Parameters
+- `ss::AbstractArray{Float64}`: Interpolation nodes
+- `C::Vector{Float64}`: Chevishev coefficients
+- `Tv::Vector{Float64}`: Value function vector
+- `X::Vector{Float64}`: Policy function vector
+##### Returns
+- `Tv::Vector{Float64}`: Value function vector
+- `X::Vector{Float64}`: Policy function vector
+"""
 function s_wise_max!(cdp::ContinuousDP, ss::AbstractArray{Float64},
                      C::Vector{Float64}, Tv::Vector{Float64},
                      X::Vector{Float64})
@@ -185,6 +218,13 @@ function s_wise_max!(cdp::ContinuousDP, ss::AbstractArray{Float64},
     return Tv, X
 end
 
+@doc doc"""
+Call optimization function for value function iteration.
+##### Arguments
+- `cdp::ContinuousDP`: Object that contains the Model Parameters
+- `ss::AbstractArray{Float64}`: Interpolation nodes
+- `C::Vector{Float64}`: Chevishev coefficients
+"""
 function s_wise_max(cdp::ContinuousDP, ss::AbstractArray{Float64},
                     C::Vector{Float64})
     n = size(ss, 1)
@@ -193,6 +233,15 @@ function s_wise_max(cdp::ContinuousDP, ss::AbstractArray{Float64},
 end
 
 
+@doc doc"""
+Update basis coefficients by value function iteration.
+##### Arguments
+- `cdp::ContinuousDP`: Object that contains the Model Parameters
+- `C::Vector{Float64}`: Chevishev coefficients
+- `Tv::Vector{Float64}`: Updated value function vector
+##### Returns
+- `C::Vector{Float64}`: Updated chevishev coefficients
+"""
 function bellman_operator!(cdp::ContinuousDP, C::Vector{Float64},
                            Tv::Vector{Float64})
     Tv = s_wise_max!(cdp, cdp.interp.S, C, Tv)
@@ -201,6 +250,16 @@ function bellman_operator!(cdp::ContinuousDP, C::Vector{Float64},
 end
 
 
+"""
+Updates policy function
+
+#### Parameters
+- `cdp::ContinuousDP`: Object that contains the Model Parameters
+- `C::Vector{Float64}`: Basis coefficients
+- `X::Vector{Float64}`: A buffer array to hold the updated policy function. Initial value not used and will be overwritten.
+#### Returns
+- `X::Vector{Float64}`: Updated policy function vector
+"""
 function compute_greedy!(cdp::ContinuousDP, ss::AbstractArray{Float64},
                          C::Vector{Float64}, X::Vector{Float64})
     n = size(ss, 1)
@@ -211,10 +270,24 @@ function compute_greedy!(cdp::ContinuousDP, ss::AbstractArray{Float64},
     return X
 end
 
+@doc doc"""
+Wrapper for `compute_greedy!(cdp, cdp.interp.S, C, X)`
+NOTE: See `compute_greedy!(cdp, cdp.interp.S, C, X)` for further details
+"""
 compute_greedy!(cdp::ContinuousDP, C::Vector{Float64}, X::Vector{Float64}) =
     compute_greedy!(cdp, cdp.interp.S, C, X)
 
 
+@doc doc"""
+Updates basis coefficients
+
+#### Parameters
+- `cdp::ContinuousDP`: Object that contains the Model Parameters
+- `X::Vector{Float64}`: Policy function vector
+- `C::Vector{Float64}`: A buffer array to hold the basis coefficients. Initial value not used and will be overwritten.
+#### Returns
+- `C::Vector{Float64}`: Updated basis coefficients
+"""
 function evaluate_policy!(cdp::ContinuousDP{N}, X::Vector{Float64},
                           C::Vector{Float64}) where N
     n = size(cdp.interp.S, 1)
@@ -243,6 +316,17 @@ function evaluate_policy!(cdp::ContinuousDP{N}, X::Vector{Float64},
 end
 
 
+@doc doc"""
+Update basis coefficients.
+
+#### Parameters
+- `cdp::ContinuousDP`: Object that contains the Model Parameters
+- `C::Vector{Float64}`: Basis coefficients
+- `X::Vector{Float64}`: A buffer array to hold the updated policy function. Initial value not used and will be overwritten.
+
+#### Returns
+- `C::Vector{Float64}` Updated basis coefficients
+"""
 function policy_iteration_operator!(cdp::ContinuousDP, C::Vector{Float64},
                                     X::Vector{Float64})
     compute_greedy!(cdp, C, X)
@@ -251,6 +335,16 @@ function policy_iteration_operator!(cdp::ContinuousDP, C::Vector{Float64},
 end
 
 
+@doc doc"""
+Compute basis coefficients until it converges.
+
+##### Parameters
+- `T::Function`: Function that updates basis coefficients
+-
+##### Returns
+- `converged::Bool`: Bool that shows whether basis coefficients converge
+- `i::Int64`: Number of iteration it took to converge.
+"""
 function operator_iteration!(T::Function, C::TC, tol::Float64, max_iter;
                              verbose::Int=2, print_skip::Int=50) where TC
     converged = false
@@ -289,6 +383,18 @@ end
 
 #= Solve methods =#
 
+@doc doc"""
+Solve the dynamic programming problem
+##### Arguments
+- `cdp::ContinuousDP`: Object that contains the Model Parameters
+- `method::Type{T<Algo}(PFI)`: Type name specifying solution method. Acceptable arguments are 'VFI' for value function iteration or 'PFI' for policy function iteration. Default solution method is 'PFI'.
+- `tol::Real(sqrt(eps))`: Value for epsilon-optimality
+- `max_iter::Int(500)`: Maximum number of iterations
+- `verbose::Int(2)`: Value for printing results or warnings. If verbose is greater than or equal to 1, print warnings about number of iteration. Especially, print results if verbose is equal to 2. If verbose is smaller thn 1, print nothing.
+- `print_skip::Int(50)`: Value for interim reports that contains number of iteration and error. Every print_skip times, print interim reports.
+##### Returns
+- `res::CDPSolveResult{Algo,N,TR,TS}`: Optimization result represented as a CDPSolveResult. See CDPSolveResult for details.
+"""
 function solve(cdp::ContinuousDP{N,TR,TS}, method::Type{Algo}=PFI;
                tol::Real=sqrt(eps()), max_iter::Integer=500,
                verbose::Int=2,
@@ -302,6 +408,10 @@ end
 
 
 # Policy iteration
+@doc doc"""
+Impliments Policy Iteration
+NOTE: See `solve` for further details
+"""
 function _solve!(cdp::ContinuousDP, res::CDPSolveResult{PFI},
                  verbose, print_skip)
     C = res.C
@@ -315,6 +425,10 @@ end
 
 
 # Value iteration
+@doc doc"""
+Impliments Value Iteration
+NOTE: See `solve` for further details
+"""
 function _solve!(cdp::ContinuousDP, res::CDPSolveResult{VFI},
                  verbose, print_skip)
     C = res.C
