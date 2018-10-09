@@ -16,7 +16,7 @@ import Optim
 
 #= Types and contructors =#
 
-struct Interp{N,TS<:VecOrMat,TM<:AbstractMatrix,TL<:Factorization}
+struct Interp{N,TS <: VecOrMat,TM <: AbstractMatrix,TL <: Factorization}
     basis::Basis{N}
     S::TS
     Scoord::NTuple{N,Vector{Float64}}
@@ -40,9 +40,7 @@ function Interp(basis::Basis)
 end
 
 
-mutable struct ContinuousDP{N,TR<:AbstractVecOrMat,TS<:VecOrMat,
-                            Tf<:Function,Tg<:Function,
-                            Tlb<:Function,Tub<:Function}
+mutable struct ContinuousDP{N,TR <: AbstractVecOrMat,TS <: VecOrMat,Tf <: Function,Tg <: Function,Tlb <: Function,Tub <: Function}
     f::Tf
     g::Tg
     discount::Float64
@@ -63,8 +61,7 @@ function ContinuousDP(f::Function, g::Function, discount::Float64,
 end
 
 
-mutable struct CDPSolveResult{Algo<:DPAlgorithm,N,
-                              TR<:AbstractVecOrMat,TS<:VecOrMat}
+mutable struct CDPSolveResult{Algo <: DPAlgorithm,N,TR <: AbstractVecOrMat,TS <: VecOrMat}
     cdp::ContinuousDP{N,TR,TS}
     tol::Float64
     max_iter::Int
@@ -77,9 +74,7 @@ mutable struct CDPSolveResult{Algo<:DPAlgorithm,N,
     X::Vector{Float64}
     resid::Vector{Float64}
 
-    function CDPSolveResult{Algo,N,TR,TS}(
-            cdp::ContinuousDP{N,TR,TS}, tol::Float64, max_iter::Integer
-        ) where {Algo,N,TR,TS}
+    function CDPSolveResult{Algo,N,TR,TS}(cdp::ContinuousDP{N,TR,TS}, tol::Float64, max_iter::Integer) where {Algo,N,TR,TS}
         C = zeros(cdp.interp.length)
         converged = false
         num_iter = 0
@@ -104,36 +99,28 @@ function evaluate!(res::CDPSolveResult)
     return res
 end
 
-function set_eval_nodes!(
-        res::CDPSolveResult{Algo,1}, s_nodes_coord::NTuple{1,Vector{Float64}}
-    ) where {Algo}
+function set_eval_nodes!(res::CDPSolveResult{Algo,1}, s_nodes_coord::NTuple{1,Vector{Float64}}) where {Algo}
     s_nodes = s_nodes_coord[1]
     res.eval_nodes = s_nodes
     res.eval_nodes_coord = s_nodes_coord
     evaluate!(res)
 end
 
-function set_eval_nodes!(
-        res::CDPSolveResult{Algo,N}, s_nodes_coord::NTuple{N,Vector{Float64}}
-    ) where {Algo,N}
+function set_eval_nodes!(res::CDPSolveResult{Algo,N}, s_nodes_coord::NTuple{N,Vector{Float64}}) where {Algo,N}
     s_nodes = gridmake(s_nodes_coord...)
     res.eval_nodes = s_nodes
     res.eval_nodes_coord = s_nodes_coord
     evaluate!(res)
 end
 
-function set_eval_nodes!(
-        res::CDPSolveResult{Algo,N}, s_nodes_coord::NTuple{N,AbstractVector}
-    ) where {Algo,N}
+function set_eval_nodes!(res::CDPSolveResult{Algo,N}, s_nodes_coord::NTuple{N,AbstractVector}) where {Algo,N}
     T = Float64
     s_nodes_coord_vecs =
         ntuple(i -> collect(T, s_nodes_coord[i]), N)::NTuple{N,Vector{T}}
     set_eval_nodes!(res, s_nodes_coord_vecs)
 end
 
-function set_eval_nodes!(
-        res::CDPSolveResult{Algo,N}, s_nodes_coord::Vararg{AbstractVector,N}
-    ) where {Algo,N}
+function set_eval_nodes!(res::CDPSolveResult{Algo,N}, s_nodes_coord::Vararg{AbstractVector,N}) where {Algo,N}
     set_eval_nodes!(res, s_nodes_coord)
 end
 
@@ -167,7 +154,7 @@ function _s_wise_max(cdp::ContinuousDP, s, C)
         Vp = funeval(C, cdp.interp.basis, sp)
         cont = cdp.discount * dot(cdp.weights, Vp)
         flow = cdp.f(s, x)
-        -1*(flow + cont)
+        -1 * (flow + cont)
     end
     res = Optim.optimize(objective, cdp.x_lb(s), cdp.x_ub(s))
     v = -res.minimum::Float64
@@ -251,9 +238,9 @@ end
 
 
 """
-Updates policy function
+Updates policy function vector
 
-#### Parameters
+#### Arguments
 - `cdp::ContinuousDP`: Object that contains the Model Parameters
 - `C::Vector{Float64}`: Basis coefficients
 - `X::Vector{Float64}`: A buffer array to hold the updated policy function. Initial value not used and will be overwritten.
@@ -281,7 +268,7 @@ compute_greedy!(cdp::ContinuousDP, C::Vector{Float64}, X::Vector{Float64}) =
 @doc doc"""
 Updates basis coefficients
 
-#### Parameters
+#### Arguments
 - `cdp::ContinuousDP`: Object that contains the Model Parameters
 - `X::Vector{Float64}`: Policy function vector
 - `C::Vector{Float64}`: A buffer array to hold the basis coefficients. Initial value not used and will be overwritten.
@@ -300,10 +287,8 @@ function evaluate_policy!(cdp::ContinuousDP{N}, X::Vector{Float64},
         for (j, w) in enumerate(cdp.weights)
             e = cdp.shocks[(j, te...)...]
             s_next = cdp.g(s, X[i], e)
-            A[i, :] -= ckron(
-                [vec(evalbase(cdp.interp.basis.params[k], s_next[k]))
-                 for k in N:-1:1]...
-            ) * cdp.discount * w
+            A[i, :] -= ckron([vec(evalbase(cdp.interp.basis.params[k], s_next[k]))
+                 for k in N:-1:1]...) * cdp.discount * w
         end
     end
     A_lu = lu(A)
@@ -319,7 +304,7 @@ end
 @doc doc"""
 Update basis coefficients.
 
-#### Parameters
+#### Arguments
 - `cdp::ContinuousDP`: Object that contains the Model Parameters
 - `C::Vector{Float64}`: Basis coefficients
 - `X::Vector{Float64}`: A buffer array to hold the updated policy function. Initial value not used and will be overwritten.
@@ -338,7 +323,7 @@ end
 @doc doc"""
 Compute basis coefficients until it converges.
 
-##### Parameters
+##### Arguments
 - `T::Function`: Function that updates basis coefficients
 -
 ##### Returns
@@ -398,7 +383,7 @@ Solve the dynamic programming problem
 function solve(cdp::ContinuousDP{N,TR,TS}, method::Type{Algo}=PFI;
                tol::Real=sqrt(eps()), max_iter::Integer=500,
                verbose::Int=2,
-               print_skip::Int=50) where {Algo<:DPAlgorithm,N,TR,TS}
+               print_skip::Int=50) where {Algo <: DPAlgorithm,N,TR,TS}
     tol = Float64(tol)
     res = CDPSolveResult{Algo,N,TR,TS}(cdp, tol, max_iter)
     _solve!(cdp, res, verbose, print_skip)
@@ -445,12 +430,12 @@ end
 
 function simulate!(rng::AbstractRNG, s_path::TS,
                    res::CDPSolveResult{Algo,N,TR,TS},
-                   s_init) where {Algo,N,TR,TS<:VecOrMat}
+                   s_init) where {Algo,N,TR,TS <: VecOrMat}
     ts_length = size(s_path)[end]
     cdf = cumsum(res.cdp.weights)
-    r = rand(rng, ts_length-1)
-    e_ind = Array{Int}(undef, ts_length-1)
-    for t in 1:ts_length-1
+    r = rand(rng, ts_length - 1)
+    e_ind = Array{Int}(undef, ts_length - 1)
+    for t in 1:ts_length - 1
         e_ind[t] = searchsortedlast(cdf, r[t]) + 1
     end
 
@@ -460,11 +445,11 @@ function simulate!(rng::AbstractRNG, s_path::TS,
     s_ind_front = Base.front(axes(s_path))
     e_ind_tail = Base.tail(axes(res.cdp.shocks))
     s_path[(s_ind_front..., 1)...] = s_init
-    for t in 1:ts_length-1
+    for t in 1:ts_length - 1
         s = s_path[(s_ind_front..., t)...]
         x = X_interp(s)
         e = res.cdp.shocks[(e_ind[t], e_ind_tail...)...]
-        s_path[(s_ind_front..., t+1)...] = res.cdp.g(s, x, e)
+        s_path[(s_ind_front..., t + 1)...] = res.cdp.g(s, x, e)
     end
 
     return s_path
@@ -475,14 +460,14 @@ simulate!(s_path::VecOrMat{Float64}, res::CDPSolveResult, s_init) =
 
 
 function simulate(rng::AbstractRNG, res::CDPSolveResult{Algo,1}, s_init::Real,
-                  ts_length::Integer) where {Algo<:DPAlgorithm}
+                  ts_length::Integer) where {Algo <: DPAlgorithm}
     s_path = Array{Float64}(undef, ts_length)
     simulate!(rng, s_path, res, s_init)
     return s_path
 end
 
 simulate(res::CDPSolveResult{Algo,1}, s_init::Real,
-         ts_length::Integer) where {Algo<:DPAlgorithm} =
+         ts_length::Integer) where {Algo <: DPAlgorithm} =
     simulate(Random.GLOBAL_RNG, res, s_init, ts_length)
 
 
