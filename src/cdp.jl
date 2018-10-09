@@ -134,7 +134,7 @@ end
 
 #= Methods =#
 
-@doc doc"""
+doc"""
 Compute optimal value for each grid
 ##### Arguments
 - `cdp::ContinuousDP`: Object that contains the Model Parameters
@@ -162,7 +162,7 @@ function _s_wise_max(cdp::ContinuousDP, s, C)
     return v, x
 end
 
-@doc doc"""
+doc"""
 Call optimization function for value function iteration.
 ##### Arguments
 - `cdp::ContinuousDP`: Object that contains the Model Parameters
@@ -182,7 +182,7 @@ function s_wise_max!(cdp::ContinuousDP, ss::AbstractArray{Float64},
     return Tv
 end
 
-@doc doc"""
+doc"""
 Call optimization function for value function iteration.
 ##### Arguments
 - `cdp::ContinuousDP`: Object that contains the Model Parameters
@@ -205,7 +205,7 @@ function s_wise_max!(cdp::ContinuousDP, ss::AbstractArray{Float64},
     return Tv, X
 end
 
-@doc doc"""
+doc"""
 Call optimization function for value function iteration.
 ##### Arguments
 - `cdp::ContinuousDP`: Object that contains the Model Parameters
@@ -220,7 +220,7 @@ function s_wise_max(cdp::ContinuousDP, ss::AbstractArray{Float64},
 end
 
 
-@doc doc"""
+doc"""
 Update basis coefficients by value function iteration.
 ##### Arguments
 - `cdp::ContinuousDP`: Object that contains the Model Parameters
@@ -237,9 +237,8 @@ function bellman_operator!(cdp::ContinuousDP, C::Vector{Float64},
 end
 
 
-"""
+doc"""
 Updates policy function vector
-
 #### Arguments
 - `cdp::ContinuousDP`: Object that contains the Model Parameters
 - `C::Vector{Float64}`: Basis coefficients
@@ -257,7 +256,7 @@ function compute_greedy!(cdp::ContinuousDP, ss::AbstractArray{Float64},
     return X
 end
 
-@doc doc"""
+doc"""
 Wrapper for `compute_greedy!(cdp, cdp.interp.S, C, X)`
 NOTE: See `compute_greedy!(cdp, cdp.interp.S, C, X)` for further details
 """
@@ -265,7 +264,7 @@ compute_greedy!(cdp::ContinuousDP, C::Vector{Float64}, X::Vector{Float64}) =
     compute_greedy!(cdp, cdp.interp.S, C, X)
 
 
-@doc doc"""
+doc"""
 Updates basis coefficients
 
 #### Arguments
@@ -301,7 +300,7 @@ function evaluate_policy!(cdp::ContinuousDP{N}, X::Vector{Float64},
 end
 
 
-@doc doc"""
+doc"""
 Update basis coefficients.
 
 #### Arguments
@@ -320,7 +319,7 @@ function policy_iteration_operator!(cdp::ContinuousDP, C::Vector{Float64},
 end
 
 
-@doc doc"""
+doc"""
 Compute basis coefficients until it converges.
 
 ##### Arguments
@@ -368,7 +367,7 @@ end
 
 #= Solve methods =#
 
-@doc doc"""
+doc"""
 Solve the dynamic programming problem
 ##### Arguments
 - `cdp::ContinuousDP`: Object that contains the Model Parameters
@@ -393,7 +392,7 @@ end
 
 
 # Policy iteration
-@doc doc"""
+doc"""
 Impliments Policy Iteration
 NOTE: See `solve` for further details
 """
@@ -410,7 +409,7 @@ end
 
 
 # Value iteration
-@doc doc"""
+doc"""
 Impliments Value Iteration
 NOTE: See `solve` for further details
 """
