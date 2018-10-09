@@ -97,6 +97,14 @@ end
 Base.ndims(::ContinuousDP{N}) where {N} = N
 Base.ndims(::CDPSolveResult{Algo,N}) where {Algo,N} = N
 
+@doc doc"""
+Computes optimal value, policy and residual for each grid.
+
+#### Arguments
+`res::CDPSolveResult`: Object that contains result for dynamic programming.
+#### Returns
+`res::CDPSolveResult`: Update object that contains result for dynamic programming.
+"""
 function evaluate!(res::CDPSolveResult)
     cdp, C, s_nodes = res.cdp, res.C, res.eval_nodes
     res.V, res.X = s_wise_max(cdp, s_nodes, C)
