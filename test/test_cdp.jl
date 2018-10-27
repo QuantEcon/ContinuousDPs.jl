@@ -68,6 +68,13 @@
                 @test isapprox(s_path[end], s_path_star[end]; atol=atol)
             end
         end
+
+        @testset "Test warning" begin
+            cdp = ContinuousDP(
+                f, g, beta, shocks, weights, x_lb, x_ub, bases[1]
+            )
+            @test_logs (:warn, r".*max_iter.*") solve(cdp, max_iter=1)
+        end
     end
 
 end
