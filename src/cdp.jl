@@ -255,6 +255,14 @@ function operator_iteration!(T::Function, C::TC, tol::Float64, max_iter;
                              verbose::Int=2, print_skip::Int=50) where TC
     converged = false
     i = 0
+
+    if max_iter <= 0
+        if verbose >= 1
+            @warn("No computation performed with max_iter=$max_iter")
+        end
+        return converged, i
+    end
+
     err = tol + 1
     C_old = similar(C)
     while true
