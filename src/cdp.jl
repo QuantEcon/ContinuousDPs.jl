@@ -277,7 +277,7 @@ function operator_iteration!(T::Function, C::TC, tol::Float64, max_iter;
 
     if verbose >= 1
         if !converged
-            warn("max_iter attained")
+            @warn("max_iter attained")
         elseif verbose == 2
             println("Converged in $i steps")
         end
