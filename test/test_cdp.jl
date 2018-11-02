@@ -73,7 +73,10 @@
             cdp = ContinuousDP(
                 f, g, beta, shocks, weights, x_lb, x_ub, bases[1]
             )
-            @test_logs (:warn, r".*max_iter.*") solve(cdp, max_iter=1)
+            for max_iter in [0, 1]
+                @test_logs (:warn, r".*max_iter.*")
+                           solve(cdp, max_iter=max_iter)
+           end
         end
     end
 
