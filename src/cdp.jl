@@ -17,14 +17,16 @@ import Optim
 #= Types and contructors =#
 
 """
-Struct contains information about interpolation
+    Interp{N,TS <: VecOrMat,TM <: AbstractMatrix,TL <: Factorization}
+
+Object contains information about interpolation
 
 # Fields
 - `basis::Basis{N}`: Object that contains interpolation basis information
-- `S::TS`:
-- `Scoord::NTuple{N,Vector{Float64}}`
-- `length::Int`
-- `size::NTuple{N,Int}`
+- `S::TS`: Vector or Matrix that contains interpolation nodes in [0,1]
+- `Scoord::NTuple{N,Vector{Float64}}` Tuple that contains transformed interpolation nodes
+- `length::Int`: Degree of interpolation at tensor grid
+- `size::NTuple{N,Int}`: Tuple that contains degree of interpolation at each dimension
 - `lb::NTuple{N,Float64}`: Lower bound of domain
 - `ub::NTuple{N,Float64}`: Upper bound of domain
 - `Phi::TM`: Interpolation basis function
@@ -54,6 +56,22 @@ function Interp(basis::Basis)
 end
 
 
+"""
+    ContinuousDP{N,TR <: AbstractVecOrMat,TS <: VecOrMat,Tf <: Function,Tg <: Function,Tlb <: Function,Tub <: Function}
+
+Object contains information about model parameters, function, upper,lower bound of grid.
+
+# Fields
+- `f::Tg`: Reward function
+- `g::Tg`: Markov transition function
+- `discount::Float64`: Discount factor
+- `shocks::TR`: Random variables' nodes
+- `weights::Vector{Float64}`: Random variables' weights
+- `x_lb::Tlb`: Lower bound of action variables
+- `x_ub::Tub`: Upper bound of action variables
+- `interp::Interp{N,TS}`: Objects that contains information about interpolation
+"""
+
 mutable struct ContinuousDP{N,TR <: AbstractVecOrMat,TS <: VecOrMat,Tf <: Function,Tg <: Function,Tlb <: Function,Tub <: Function}
     f::Tf
     g::Tg
@@ -65,6 +83,26 @@ mutable struct ContinuousDP{N,TR <: AbstractVecOrMat,TS <: VecOrMat,Tf <: Functi
     interp::Interp{N,TS}
 end
 
+"""
+    ContinuousDP(f::Function, g::Function, discount::Float64,
+                      shocks::Array{Float64}, weights::Vector{Float64},
+                      x_lb::Function, x_ub::Function,
+                      basis::Basis)
+
+Constructs ContinuousDP struct
+
+# Arguments
+- `f::Tg`: Reward function
+- `g::Tg`: Markov transition function
+- `discount::Float64`: Discount factor
+- `shocks::TR`: Random variables' nodes
+- `weights::Vector{Float64}`: Random variables' weights
+- `x_lb::Tlb`: Lower bound of action variables
+- `x_ub::Tub`: Upper bound of action variables
+- `basis::Basis`: Objects that contains information about basis function,
+    coefficients, nodes and degree of interpolation
+"""
+
 function ContinuousDP(f::Function, g::Function, discount::Float64,
                       shocks::Array{Float64}, weights::Vector{Float64},
                       x_lb::Function, x_ub::Function,
@@ -73,6 +111,27 @@ function ContinuousDP(f::Function, g::Function, discount::Float64,
     cdp = ContinuousDP(f, g, discount, shocks, weights, x_lb, x_ub, interp)
     return cdp
 end
+
+
+"""
+    CDPSolveResult{Algo <: DPAlgorithm,N,TR <: AbstractVecOrMat,TS <: VecOrMat}
+    cdp::ContinuousDP{N,TR,TS}
+
+Object that contains result of dynamic programming
+
+# Fields
+- `cdp::ContinuousDP{N,TR,TS}`: Object that contains model paramers
+- `tol::Float64`: Convergence criteria
+- `max_iter::Int`: Maximum number of iteration
+- `C::Vector{Float64}`: Basis coefficients
+- `converged::Bool`: Bool that shows whether model converges
+- `num_iter::Int`: Number of iteration until model converges
+- `eval_nodes::TS`: Evaluation vector or matrix which is in [0,1]
+- `eval_nodes_coord::NTuple{N,Vector{Float64}}`: Tuple that contains evaluation transformed grids.
+- `V::Vector{Float64}`: Computed value function
+- `X::Vector{Float64}`: Computed policy function
+- `resid::Vector{Float64}`: Residuals fo basis coefficients
+"""
 
 
 mutable struct CDPSolveResult{Algo <: DPAlgorithm,N,TR <: AbstractVecOrMat,TS <: VecOrMat}
