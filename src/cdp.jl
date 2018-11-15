@@ -325,10 +325,6 @@ function _s_wise_max(cdp::ContinuousDP, s, C)
 end
 
 """
-<<<<<<< Updated upstream
-Call optimization function for value function iteration.
-##### Arguments
-=======
     s_wise_max!(cdp, ss, C, Tv)
 
 Call optimization function to update value function.
@@ -353,10 +349,6 @@ function s_wise_max!(cdp::ContinuousDP, ss::AbstractArray{Float64},
 end
 
 """
-<<<<<<< Updated upstream
-Call optimization function for value function iteration.
-##### Arguments
-=======
     s_wise_max!(cdp, ss, C, Tv, X)
 
 Call optimization function to update value function and policy function.
@@ -386,10 +378,6 @@ function s_wise_max!(cdp::ContinuousDP, ss::AbstractArray{Float64},
 end
 
 """
-<<<<<<< Updated upstream
-Call optimization function for value function iteration.
-##### Arguments
-=======
     s_wise_max(cdp, ss, C)
 
 Call optimization function when we use PFI for solving the model.
@@ -410,10 +398,6 @@ end
 
 
 """
-<<<<<<< Updated upstream
-Update basis coefficients by value function iteration.
-##### Arguments
-=======
     bellman_operator!(cdp, C, Tv)
 
 Update basis coefficients by value function iteration.
@@ -436,10 +420,6 @@ end
 
 
 """
-<<<<<<< Updated upstream
-Updates policy function vector
-#### Arguments
-=======
     compute_greedy!(cdp, ss, C, X)
 
 Call optimization function and updates policy function vector.
@@ -466,8 +446,6 @@ function compute_greedy!(cdp::ContinuousDP, ss::AbstractArray{Float64},
 end
 
 """
-<<<<<<< Updated upstream
-=======
     compute_greedy!(cdp, C, X)
 
 >>>>>>> Stashed changes
@@ -479,9 +457,6 @@ compute_greedy!(cdp::ContinuousDP, C::Vector{Float64}, X::Vector{Float64}) =
 
 
 """
-<<<<<<< Updated upstream
-Updates basis coefficients
-=======
     evaluate_policy!(cdp, X, C)
 
 Updates basis coefficients when we use PFI for solving the model
@@ -521,9 +496,6 @@ end
 
 
 """
-<<<<<<< Updated upstream
-Update basis coefficients.
-=======
     policy_iteration_operator!(cdp, C, X)
 Update basis coefficients by PFI.
 
@@ -547,9 +519,6 @@ end
 
 
 """
-<<<<<<< Updated upstream
-Compute basis coefficients until it converges.
-=======
     operator_iteration!(T, C, tol, max_iter;
                              verbose=2, print_skip=50)
 
@@ -613,8 +582,6 @@ end
 #= Solve methods =#
 
 """
-<<<<<<< Updated upstream
-=======
     solve(cdp, method=PFI;
                tol=sqrt(eps()), max_iter=500,
                verbose=2,
@@ -646,8 +613,6 @@ end
 
 # Policy iteration
 """
-<<<<<<< Updated upstream
-=======
     _solve!(cdp, res, verbose, print_skip)
 
 >>>>>>> Stashed changes
@@ -668,8 +633,6 @@ end
 
 # Value iteration
 """
-<<<<<<< Updated upstream
-=======
     _solve!(cdp, res, verbose, print_skip)
 
 >>>>>>> Stashed changes
@@ -752,7 +715,6 @@ simulate!(s_path::VecOrMat{Float64}, res::CDPSolveResult, s_init) =
 
 """
     simulate(rng, res, s_init, ts_length)
->>>>>>> Stashed changes
 
 function simulate(rng::AbstractRNG, res::CDPSolveResult{Algo,1}, s_init::Real,
                   ts_length::Integer) where {Algo <: DPAlgorithm}
