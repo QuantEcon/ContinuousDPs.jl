@@ -14,23 +14,25 @@ import Optim
 #= Types and contructors =#
 
 """
-    Interp{N, TS, TM, TL}
+    Interp{N,TS,TM,TL}
 
-Object contains information about interpolation
+Type that contains information about interpolation
 
 # Fields
 
 - `basis::Basis{N}`: Object that contains interpolation basis information
-- `S::TS`: Vector or Matrix that contains interpolation nodes in [0,1]
-- `Scoord::NTuple{N,Vector{Float64}}` Tuple that contains transformed interpolation nodes
+- `S::TS<:VecOrMat`: Vector or Matrix that contains interpolation nodes
+- `Scoord::NTuple{N,Vector{Float64}}` Tuple that contains transformed
+  interpolation nodes
 - `length::Int`: Degree of interpolation at tensor grid
-- `size::NTuple{N,Int}`: Tuple that contains degree of interpolation at each dimension
+- `size::NTuple{N,Int}`: Tuple that contains degree of interpolation at each
+  dimension
 - `lb::NTuple{N,Float64}`: Lower bound of domain
 - `ub::NTuple{N,Float64}`: Upper bound of domain
-- `Phi::TM`: Interpolation basis function
-- `Phi_lu::TM`: LU factorized interpolation basis function
+- `Phi::TM<:AbstractMatrix`: Interpolation basis matrix
+- `Phi_lu::TL<:Factorization`: LU factorized interpolation basis matrix
 """
-struct Interp{N,TS <: VecOrMat,TM <: AbstractMatrix,TL <: Factorization}
+struct Interp{N,TS<:VecOrMat,TM<:AbstractMatrix,TL<:Factorization}
     basis::Basis{N}
     S::TS
     Scoord::NTuple{N,Vector{Float64}}
@@ -45,7 +47,7 @@ end
 """
     Interp(basis)
 
-Construct `Interp` struct that contains information about interpolation.
+Constructor for `Interp`
 
 # Arguments
 
@@ -64,22 +66,25 @@ end
 
 
 """
-    ContinuousDP{N, TR, TS, Tf, Tg, Tlb, Tub}
+    ContinuousDP{N,TR,TS,Tf,Tg,Tlb,Tub}
 
-Object contains information about model parameters, function, upper,lower bound of grid.
+Type that reperesents a continuous-state dynamic program
 
 # Fields
 
-- `f::Tg`: Reward function
-- `g::Tg`: Markov transition function
+- `f::Tf<:Function`: Reward function
+- `g::Tg<:Function`: State transition function
 - `discount::Float64`: Discount factor
-- `shocks::TR`: Random variables' nodes
+- `shocks::TR<:AbstractVecOrMat`: Random variables' nodes
 - `weights::Vector{Float64}`: Random variables' weights
-- `x_lb::Tlb`: Lower bound of action variables
-- `x_ub::Tub`: Upper bound of action variables
-- `interp::Interp{N,TS}`: Objects that contains information about interpolation
+- `x_lb::Tlb<:Function`: Lower bound of action variables
+- `x_ub::Tub<:Function`: Upper bound of action variables
+- `interp::Interp{N,TS<:VecOrMat}`: Object that contains information about
+  interpolation
 """
-mutable struct ContinuousDP{N,TR <: AbstractVecOrMat,TS <: VecOrMat,Tf <: Function,Tg <: Function,Tlb <: Function,Tub <: Function}
+mutable struct ContinuousDP{N,TR<:AbstractVecOrMat,TS<:VecOrMat,
+                            Tf<:Function,Tg<:Function,
+                            Tlb<:Function,Tub<:Function}
     f::Tf
     g::Tg
     discount::Float64
@@ -91,24 +96,19 @@ mutable struct ContinuousDP{N,TR <: AbstractVecOrMat,TS <: VecOrMat,Tf <: Functi
 end
 
 """
-    ContinuousDP(f, g, discount,
-                    shocks, weights,
-                    x_lb, x_ub,
-                    basis)
+    ContinuousDP(f, g, discount, shocks, weights, x_lb, x_ub, basis)
 
-Constructs ContinuousDP struct.
+Constructor for `ContinuousDP`
 
 # Arguments
-
-- `f::Tg`: Reward function
-- `g::Tg`: Markov transition function
+- `f::Tf<:Function`: Reward function
+- `g::Tg<:Function`: State transition function
 - `discount::Float64`: Discount factor
-- `shocks::TR`: Random variables' nodes
+- `shocks::TR<:AbstractVecOrMat`: Random variables' nodes
 - `weights::Vector{Float64}`: Random variables' weights
-- `x_lb::Tlb`: Lower bound of action variables
-- `x_ub::Tub`: Upper bound of action variables
-- `basis::Basis`: Objects that contains information about basis function,
-    coefficients, nodes and degree of interpolation
+- `x_lb::Tlb<:Function`: Lower bound of action variables
+- `x_ub::Tub<:Function`: Upper bound of action variables
+- `basis::Basis`: Object that contains interpolation basis information
 """
 function ContinuousDP(f::Function, g::Function, discount::Float64,
                       shocks::Array{Float64}, weights::Vector{Float64},
@@ -121,25 +121,27 @@ end
 
 
 """
-    CDPSolveResult{Algo, N, TR, TS}
+    CDPSolveResult{Algo,N,TR,TS}
 
-Object that contains result of dynamic programming
+Type that contains the solution result of continuous-state dynamic programming
 
 # Fields
 
 - `cdp::ContinuousDP{N,TR,TS}`: Object that contains model paramers
 - `tol::Float64`: Convergence criteria
 - `max_iter::Int`: Maximum number of iteration
-- `C::Vector{Float64}`: Basis coefficients
+- `C::Vector{Float64}`: Basis coefficients vector
 - `converged::Bool`: Bool that shows whether model converges
 - `num_iter::Int`: Number of iteration until model converges
-- `eval_nodes::TS`: Evaluation vector or matrix which is in [0,1]
-- `eval_nodes_coord::NTuple{N,Vector{Float64}}`: Tuple that contains evaluation transformed grids.
+- `eval_nodes::TS<:VecOrMat`: Evaluation vector or matrix
+- `eval_nodes_coord::NTuple{N,Vector{Float64}}`: Tuple that contains evaluation
+  transformed grids
 - `V::Vector{Float64}`: Computed value function
 - `X::Vector{Float64}`: Computed policy function
-- `resid::Vector{Float64}`: Residuals fo basis coefficients
+- `resid::Vector{Float64}`: Residuals of basis coefficients
 """
-mutable struct CDPSolveResult{Algo <: DPAlgorithm,N,TR <: AbstractVecOrMat,TS <: VecOrMat}
+mutable struct CDPSolveResult{Algo<:DPAlgorithm,N,
+                              TR<:AbstractVecOrMat,TS<:VecOrMat}
     cdp::ContinuousDP{N,TR,TS}
     tol::Float64
     max_iter::Int
@@ -152,7 +154,9 @@ mutable struct CDPSolveResult{Algo <: DPAlgorithm,N,TR <: AbstractVecOrMat,TS <:
     X::Vector{Float64}
     resid::Vector{Float64}
 
-    function CDPSolveResult{Algo,N,TR,TS}(cdp::ContinuousDP{N,TR,TS}, tol::Float64, max_iter::Integer) where {Algo,N,TR,TS}
+    function CDPSolveResult{Algo,N,TR,TS}(
+            cdp::ContinuousDP{N,TR,TS}, tol::Float64, max_iter::Integer
+        ) where {Algo,N,TR,TS}
         C = zeros(cdp.interp.length)
         converged = false
         num_iter = 0
@@ -170,16 +174,14 @@ end
 Base.ndims(::ContinuousDP{N}) where {N} = N
 Base.ndims(::CDPSolveResult{Algo,N}) where {Algo,N} = N
 
-
-
 """
     evaluate!(res)
 
-Evaluate value function and policy function at each point.
+Evaluate the value function and the policy function at each point
 
 # arguments
 
-- `res::CDPSolveResult`: Object that contains result of dynamic programming
+- `res::CDPSolveResult`: Object to store the result of dynamic programming
 """
 function evaluate!(res::CDPSolveResult)
     cdp, C, s_nodes = res.cdp, res.C, res.eval_nodes
@@ -188,71 +190,49 @@ function evaluate!(res::CDPSolveResult)
     return res
 end
 
-"""
- set_eval_nodes!(res, s_nodes_coord)
-
-Set evaluation nodes. This function is called when problem is 1d problem.
-
-# Arguments
-
-- `res::CDPSolveResult{Algo,1}`: Object that contains result of dynamic programming
-- `s_nodes_coord::NTuple{1,Vector{Float64}}`: evaluation nodes that we want to use
-"""
-function set_eval_nodes!(res::CDPSolveResult{Algo,1}, s_nodes_coord::NTuple{1,Vector{Float64}}) where {Algo}
+function set_eval_nodes!(
+        res::CDPSolveResult{Algo,1}, s_nodes_coord::NTuple{1,Vector{Float64}}
+    ) where {Algo}
     s_nodes = s_nodes_coord[1]
     res.eval_nodes = s_nodes
     res.eval_nodes_coord = s_nodes_coord
     evaluate!(res)
 end
 
-"""
- set_eval_nodes!(res, s_nodes_coord)
-
-Set evaluation nodes. This function is called when model is multi dimentional problem.
-
-# Arguments
-- `res::CDPSolveResult{Algo,N}`: Object that contains result of dynamic programming
-- `s_nodes_coord::NTuple{1,Vector{Float64}}`: evaluation nodes that we want to use
-"""
-function set_eval_nodes!(res::CDPSolveResult{Algo,N}, s_nodes_coord::NTuple{N,Vector{Float64}}) where {Algo,N}
+function set_eval_nodes!(
+        res::CDPSolveResult{Algo,N}, s_nodes_coord::NTuple{N,Vector{Float64}}
+    ) where {Algo,N}
     s_nodes = gridmake(s_nodes_coord...)
     res.eval_nodes = s_nodes
     res.eval_nodes_coord = s_nodes_coord
     evaluate!(res)
 end
 
-
-"""
-    set_eval_nodes!(res, s_nodes_coord)
-
-Set evaluation nodes. This function is called when model is multi dimensional problem.
-
-# Arguments
-
-- `res::CDPSolveResult`: Object that contains result of dynamic programming
-- `s_nodes_coord::NTuple{N,AbstractVector}`: evaluation nodes that we want to use
-"""
-function set_eval_nodes!(res::CDPSolveResult{Algo,N}, s_nodes_coord::NTuple{N,AbstractVector}) where {Algo,N}
+function set_eval_nodes!(
+        res::CDPSolveResult{Algo,N}, s_nodes_coord::NTuple{N,AbstractVector}
+    ) where {Algo,N}
     T = Float64
     s_nodes_coord_vecs =
         ntuple(i -> collect(T, s_nodes_coord[i]), N)::NTuple{N,Vector{T}}
     set_eval_nodes!(res, s_nodes_coord_vecs)
 end
 
+function set_eval_nodes!(
+        res::CDPSolveResult{Algo,N}, s_nodes_coord::Vararg{AbstractVector,N}
+    ) where {Algo,N}
+    set_eval_nodes!(res, s_nodes_coord)
+end
 
-"""
-     set_eval_nodes!(res, s_nodes_coord)
+@doc """
+    set_eval_nodes!(res, s_nodes_coord)
 
-Set evaluation nodes. This function is called when model is multi dimensional problem.
+Set evaluation nodes
 
 # Arguments
 
-- `res::CDPSolveResult`: Object that contains result of dynamic programming
-- `s_nodes_coord::Vararg{AbstractVector,N}`: evaluation nodes that we want to use
-"""
-function set_eval_nodes!(res::CDPSolveResult{Algo,N}, s_nodes_coord::Vararg{AbstractVector,N}) where {Algo,N}
-    set_eval_nodes!(res, s_nodes_coord)
-end
+- `res::CDPSolveResult`: Object that contains the result of dynamic programming
+- `s_nodes_coord::NTuple{N,AbstractVector}`: Evaluation nodes
+""" set_eval_nodes!
 
 function (res::CDPSolveResult)(s_nodes::AbstractArray{Float64})
     cdp, C = res.cdp, res.C
@@ -264,19 +244,16 @@ end
 
 #= Methods =#
 
-
-
-
 """
     _s_wise_max(cdp, s, C)
 
-Find optimal value and policy for each grid.
+Find optimal value and policy for each grid point
 
 # Arguments
 
-- `cdp::ContinuousDP`: Object that contains the Model Parameters
+- `cdp::ContinuousDP`: Object that contains model parameters
 - `s::AbstractArray{Float64}`: Interpolation nodes
-- `C::Vector{Float64}`: Basis coefficients
+- `C::Vector{Float64}`: Basis coefficients vector
 
 # Returns
 
@@ -303,18 +280,18 @@ end
 """
     s_wise_max!(cdp, ss, C, Tv)
 
-Call optimization function to update value function.
+Find optimal value for each grid point
 
 # Arguments
 
-- `cdp::ContinuousDP`: Object that contains the Model Parameters
+- `cdp::ContinuousDP`: Object that contains model parameters
 - `ss::AbstractArray{Float64}`: interpolation nodes
-- `C::Vector{Float64}`: Basis coefficients
-- `Tv::Vector{Float64}`: A buffer array to hold the updated value function. Initial value not used and will be overwritten.
+- `C::Vector{Float64}`: Basis coefficients vector
+- `Tv::Vector{Float64}`: A buffer array to hold the updated value function
 
 # Returns
 
-- `Tv::typeof(Tv)`: Updated value function vector
+- `Tv::Vector{Float64}`: Updated value function vector
 """
 function s_wise_max!(cdp::ContinuousDP, ss::AbstractArray{Float64},
                      C::Vector{Float64}, Tv::Vector{Float64})
@@ -327,23 +304,22 @@ function s_wise_max!(cdp::ContinuousDP, ss::AbstractArray{Float64},
 end
 
 """
-    s_wise_max!(cdp, ss, C, Tv, X)
+    s_wise_max!(cdp, ss, C, Tv)
 
-Call optimization function to update value function and policy function.
-Also see `_s_wise_max(cdp, s, C)`.
+Find optimal value and policy for each grid point
 
 # Arguments
 
-- `cdp::ContinuousDP`: Object that contains the Model Parameters
-- `ss::AbstractArray{Float64}`: Interpolation nodes
-- `C::Vector{Float64}`: Chevishev coefficients
-- `Tv::Vector{Float64}`: Value function vector
-- `X::Vector{Float64}`: Policy function vector
+- `cdp::ContinuousDP`: Object that contains model parameters
+- `ss::AbstractArray{Float64}`: interpolation nodes
+- `C::Vector{Float64}`: Basis coefficients vector
+- `Tv::Vector{Float64}`: A buffer array to hold the updated value function
+- `X::Vector{Float64}`: A buffer array to hold the updeted policy function
 
 # Returns
 
-- `Tv::Vector{Float64}`: Value function vector
-- `X::Vector{Float64}`: Policy function vector
+- `Tv::Vector{Float64}`: Updated value function vector
+- `X::Vector{Float64}`: Updated policy function vector
 """
 function s_wise_max!(cdp::ContinuousDP, ss::AbstractArray{Float64},
                      C::Vector{Float64}, Tv::Vector{Float64},
@@ -359,13 +335,18 @@ end
 """
     s_wise_max(cdp, ss, C)
 
-Call optimization function when we use PFI for solving the model.
+Find optimal value and policy for each grid point
 
 # Arguments
 
-- `cdp::ContinuousDP`: Object that contains the Model Parameters
+- `cdp::ContinuousDP`: Object that contains model parameters
 - `ss::AbstractArray{Float64}`: Interpolation nodes
-- `C::Vector{Float64}`: Chevishev coefficients
+- `C::Vector{Float64}`: Basis coefficients vector
+
+# Returns
+
+- `Tv::Vector{Float64}`: Value function vector
+- `X::Vector{Float64}`: Policy function vector
 """
 function s_wise_max(cdp::ContinuousDP, ss::AbstractArray{Float64},
                     C::Vector{Float64})
@@ -378,18 +359,17 @@ end
 """
     bellman_operator!(cdp, C, Tv)
 
-Update basis coefficients by value function iteration.
-Also see `s_wise_max!(cdp, ss, C, Tv)`
+Update basis coefficients. Values are stored in `Tv`
 
 # Arguments
 
-- `cdp::ContinuousDP`: Object that contains the Model Parameters
-- `C::Vector{Float64}`: Chevishev coefficients
-- `Tv::Vector{Float64}`: Updated value function vector
+- `cdp::ContinuousDP`: Object that contains model parameters
+- `C::Vector{Float64}`: Basis coefficients vector
+- `Tv::Vector{Float64}`: Vector to store values
 
 # Returns
 
-- `C::Vector{Float64}`: Updated chevishev coefficients
+- `C::Vector{Float64}`: Updated basis coefficients vector
 """
 function bellman_operator!(cdp::ContinuousDP, C::Vector{Float64},
                            Tv::Vector{Float64})
@@ -400,16 +380,17 @@ end
 
 
 """
+    compute_greedy!(cdp, C, X)
     compute_greedy!(cdp, ss, C, X)
 
-Call optimization function and updates policy function vector.
-Also see `_s_wise_max(cdp, s, C)`.
+Updates policy function vector
 
 # Arguments
 
-- `cdp::ContinuousDP`: Object that contains the Model Parameters
-- `C::Vector{Float64}`: Basis coefficients
-- `X::Vector{Float64}`: A buffer array to hold the updated policy function. Initial value not used and will be overwritten.
+- `cdp::ContinuousDP`: Object that contains model parameters
+- `ss::AbstractArray{Float64}`: Interpolation nodes
+- `C::Vector{Float64}`: Basis coefficients vector
+- `X::Vector{Float64}`: A buffer array to hold the updated policy function.
 
 # Returns
 
@@ -425,25 +406,23 @@ function compute_greedy!(cdp::ContinuousDP, ss::AbstractArray{Float64},
     return X
 end
 
-"""
-    compute_greedy!(cdp, C, X)
-
-Wrapper for `compute_greedy!(cdp, cdp.interp.S, C, X)`
-NOTE: See `compute_greedy!(cdp, cdp.interp.S, C, X)` for further details.
-"""
 compute_greedy!(cdp::ContinuousDP, C::Vector{Float64}, X::Vector{Float64}) =
     compute_greedy!(cdp, cdp.interp.S, C, X)
 
-
 """
     evaluate_policy!(cdp, X, C)
-Updates basis coefficients when we use PFI for solving the model
+
+Update basis coefficients
+
 # Arguments
-- `cdp::ContinuousDP`: Object that contains the Model Parameters
+
+- `cdp::ContinuousDP`: Object that contains model parameters
 - `X::Vector{Float64}`: Policy function vector
-- `C::Vector{Float64}`: A buffer array to hold the basis coefficients. Initial value not used and will be overwritten.
+- `C::Vector{Float64}`: A buffer array to hold the basis coefficients
+
 # Returns
-- `C::Vector{Float64}`: Updated basis coefficients
+
+- `C::Vector{Float64}`: Updated basis coefficients vector
 """
 function evaluate_policy!(cdp::ContinuousDP{N}, X::Vector{Float64},
                           C::Vector{Float64}) where N
@@ -474,17 +453,17 @@ end
 """
     policy_iteration_operator!(cdp, C, X)
 
-Update basis coefficients by PFI.
+Update basis coefficients by policy function iteration
 
 # Arguments
 
-- `cdp::ContinuousDP`: Object that contains the Model Parameters
-- `C::Vector{Float64}`: Basis coefficients
-- `X::Vector{Float64}`: A buffer array to hold the updated policy function. Initial value not used and will be overwritten.
+- `cdp::ContinuousDP`: Object that contains model parameters
+- `C::Vector{Float64}`: Basis coefficients vector
+- `X::Vector{Float64}`: A buffer array to hold the updated policy function
 
 # Returns
 
-- `C::Vector{Float64}` Updated basis coefficients
+- `C::Vector{Float64}` Updated basis coefficients vector
 """
 function policy_iteration_operator!(cdp::ContinuousDP, C::Vector{Float64},
                                     X::Vector{Float64})
@@ -495,24 +474,25 @@ end
 
 
 """
-    operator_iteration!(T, C, tol, max_iter;
-                             verbose=2, print_skip=50)
+    operator_iteration!(T, C, tol, max_iter; verbose=2, print_skip=50)
 
 Updates basis coefficients until it converges.
 
 # Arguments
 
 - `T::Function`: Function that updates basis coefficients by VFI or PFI
-- `C::Vector{Float64}`: initial basis coefficients
+- `C::Vector{Float64}`: initial basis coefficients vector
 - `tol::Float64`: Tolerance to be used to update basis coefficients
-- `max_iter::Int64`: The maximum number of iteration
-- `verbose::Int`: Value for printing results or warnings. If verbose is greater than or equal to 1, print warnings about number of iteration. Especially, print results if verbose is equal to 2. If verbose is smaller thn 1, print nothing.
-- `print_skip::Int`: Value for interim reports that contains number of iteration and error. Every print_skip times, print interim reports.
+- `max_iter::Int`: The maximum number of iteration
+- `verbose::Int`: Level of feedback (0 for no output, 1 for warnings only, 2 for
+   warning and convergence messages during iteration)
+- `print_skip::Int`: if verbose == 2, how many iterations to apply between print
+  messages
 
 # Returns
 
-- `converged::Bool`: Bool that shows whether basis coefficients converge
-- `i::Int64`: Number of iteration it took to converge.
+- `converged::Bool`: Bool that shows whether basis coefficients vector converges
+- `i::Int`: Number of iteration it took to converge
 """
 function operator_iteration!(T::Function, C::TC, tol::Float64, max_iter;
                              verbose::Int=2, print_skip::Int=50) where TC
@@ -561,30 +541,33 @@ end
 #= Solve methods =#
 
 """
-    solve(cdp, method=PFI;
-               tol=sqrt(eps()), max_iter=500,
-               verbose=2,
-               print_skip=50)
+    solve(cdp, method=PFI; tol=sqrt(eps()), max_iter=500, verbose=2,
+          print_skip=50)
 
-Solve the dynamic programming problem
+Solve the continuous-state dynamic program
 
 # Arguments
 
-- `cdp::ContinuousDP`: Object that contains the Model Parameters
-- `method::Type{T<Algo}(PFI)`: Type name specifying solution method. Acceptable arguments are 'VFI' for value function iteration or 'PFI' for policy function iteration. Default solution method is 'PFI'.
-- `tol::Real(sqrt(eps))`: Value for epsilon-optimality
-- `max_iter::Int(500)`: Maximum number of iterations
-- `verbose::Int(2)`: Value for printing results or warnings. If verbose is greater than or equal to 1, print warnings about number of iteration. Especially, print results if verbose is equal to 2. If verbose is smaller thn 1, print nothing.
-- `print_skip::Int(50)`: Value for interim reports that contains number of iteration and error. Every print_skip times, print interim reports.
+- `cdp::ContinuousDP`: Object that contains model parameters
+- `method::Type{T<Algo}(PFI)`: Type name specifying solution method
+   Acceptable arguments are 'VFI' for value function iteration or
+   'PFI' for policy function iteration. Default solution method is 'PFI'.
+- `tol::Real`: Value for epsilon-optimality
+- `max_iter::Int`: Maximum number of iterations
+- `verbose::Int`: Level of feedback (0 for no output, 1 for warnings only, 2 for
+   warning and convergence messages during iteration)
+- `print_skip::Int`: if verbose == 2, how many iterations to apply between print
+  messages
 
 # Returns
 
-- `res::CDPSolveResult{Algo,N,TR,TS}`: Optimization result represented as a CDPSolveResult. See CDPSolveResult for details.
+- `res::CDPSolveResult{Algo,N,TR,TS}`: Object to store the result of dynamic
+  programming
 """
 function solve(cdp::ContinuousDP{N,TR,TS}, method::Type{Algo}=PFI;
                tol::Real=sqrt(eps()), max_iter::Integer=500,
                verbose::Int=2,
-               print_skip::Int=50) where {Algo <: DPAlgorithm,N,TR,TS}
+               print_skip::Int=50) where {Algo<:DPAlgorithm,N,TR,TS}
     tol = Float64(tol)
     res = CDPSolveResult{Algo,N,TR,TS}(cdp, tol, max_iter)
     _solve!(cdp, res, verbose, print_skip)
@@ -597,8 +580,7 @@ end
 """
     _solve!(cdp, res, verbose, print_skip)
 
-Impliments Policy Iteration
-NOTE: See `solve` for further details
+Implement Policy Iteration. See `solve` for further details.
 """
 function _solve!(cdp::ContinuousDP, res::CDPSolveResult{PFI},
                  verbose, print_skip)
@@ -615,8 +597,8 @@ end
 # Value iteration
 """
     _solve!(cdp, res, verbose, print_skip)
-Impliments Value Iteration
-NOTE: See `solve` for further details
+
+Implement Value Iteration. See `solve` for further details
 """
 function _solve!(cdp::ContinuousDP, res::CDPSolveResult{VFI},
                  verbose, print_skip)
@@ -633,24 +615,24 @@ end
 #= Simulate methods =#
 
 """
-    simulate!(rng, s_path, res, s_init)
+    simulate!([rng=GLOBAL_RNG], s_path, res, s_init)
 
-    Computes sample paths of state variables.
+Generate a sample path of state variable(s)
 
 # Arguments
 
-- `rng::AbstractRNG`: Random number generator.
-- `s_path::Integer`: Length of simulation
+- `rng::AbstractRNG`: Random number generator
+- `s_path::VecOrMat`: Array to store the generated sample path
 - `res::CDPSolveResult`: Object that contains result of dynamic programming
-- `s_init::Real`: initial value of state variable
+- `s_init`: Initial value of state variable(s)
 
 # Return
 
-- `s_path::VecOrMat`:: sample paths of state variables
+- `s_path::VecOrMat`:: Generated sample path of state variable(s)
 """
 function simulate!(rng::AbstractRNG, s_path::TS,
                    res::CDPSolveResult{Algo,N,TR,TS},
-                   s_init) where {Algo,N,TR,TS <: VecOrMat}
+                   s_init) where {Algo,N,TR,TS<:VecOrMat}
     ts_length = size(s_path)[end]
     cdf = cumsum(res.cdp.weights)
     r = rand(rng, ts_length - 1)
@@ -675,62 +657,36 @@ function simulate!(rng::AbstractRNG, s_path::TS,
     return s_path
 end
 
-
-
-"""
-    simulate!(s_path, res, s_init)
-
-Wrapper function for `simulate!(rng, s_path,res,s_init)`.
-NOTE: See `simulate!` for further details.
-"""
 simulate!(s_path::VecOrMat{Float64}, res::CDPSolveResult, s_init) =
     simulate!(Random.GLOBAL_RNG, s_path, res, s_init)
 
 """
-    simulate(rng, res, s_init, ts_length)
+    simulate([rng=GLOBAL_RNG], res, s_init, ts_length)
 
-Simulate one sample path of a state variable.
+Generate a sample path of state variable(s)
 
-#Arguments
+# Arguments
 
-- `rng::AbstractRNG`: Random number generator.
+- `rng::AbstractRNG`: Random number generator
 - `res::CDPSolveResult`: Object that contains result of dynamic programming
-- `s_init::Real`: initial value of state variable
+- `s_init`: Initial value of state variable(s)
 - `ts_length::Integer`: Length of simulation
+
+# Return
+
+- `s_path::VecOrMat`:: Generated sample path of state variable(s)
 """
 function simulate(rng::AbstractRNG, res::CDPSolveResult{Algo,1}, s_init::Real,
-                  ts_length::Integer) where {Algo <: DPAlgorithm}
+                  ts_length::Integer) where {Algo<:DPAlgorithm}
     s_path = Array{Float64}(undef, ts_length)
     simulate!(rng, s_path, res, s_init)
     return s_path
 end
 
-"""
-    simulate(res, s_init, ts_length)
-
-Simulate one sample path of a state variable. Called for 1-d dynamic programming.
-
-#Arguments
-
-- `res::CDPSolveResult`: Object that contains result of dynamic programming
-- `s_init::Real`: initial value of state variable
-- `ts_length::Integer`: Length of simulation
-"""
 simulate(res::CDPSolveResult{Algo,1}, s_init::Real,
-         ts_length::Integer) where {Algo <: DPAlgorithm} =
+         ts_length::Integer) where {Algo<:DPAlgorithm} =
     simulate(Random.GLOBAL_RNG, res, s_init, ts_length)
 
-
-"""
-    simulate(rng, res, s_init, ts_length)
-Simulate one sample path of a state variable.
-
-#Arguments
-- `rng::AbstractRNG`: Random number generator.
-- `res::CDPSolveResult`: Object that contains result of dynamic programming
-- `s_init::Real`: initial value of state variable
-- `ts_length::Integer`: Length of simulation
-"""
 function simulate(rng::AbstractRNG, res::CDPSolveResult, s_init::Vector,
                   ts_length::Integer)
     s_path = Array{Float64}(undef, length(s_init), ts_length)
@@ -738,16 +694,5 @@ function simulate(rng::AbstractRNG, res::CDPSolveResult, s_init::Vector,
     return s_path
 end
 
-"""
-    simulate(res, s_init, ts_length)
-
-Simulate one sample path of a state variable. Called for multi-dimensional dynamic programming.
-
-#Arguments
-
-- `res::CDPSolveResult`: Object that contains result of dynamic programming
-- `s_init::Real`: initial value of state variable
-- `ts_length::Integer`: Length of simulation
-"""
 simulate(res::CDPSolveResult, s_init::Vector, ts_length::Integer) =
 simulate(Random.GLOBAL_RNG, res, s_init, ts_length)
