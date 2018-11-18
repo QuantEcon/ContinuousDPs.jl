@@ -244,9 +244,6 @@ end
 
 #= Methods =#
 
-
-
-
 """
     _s_wise_max(cdp, s, C)
 
