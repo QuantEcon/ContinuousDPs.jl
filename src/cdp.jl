@@ -244,6 +244,9 @@ end
 
 #= Methods =#
 
+
+
+
 """
     _s_wise_max(cdp, s, C)
 
@@ -683,6 +686,18 @@ function simulate(rng::AbstractRNG, res::CDPSolveResult{Algo,1}, s_init::Real,
     return s_path
 end
 
+"""
+    simulate(res::CDPSolveResult{Algo,1}, s_init::Real,
+         ts_length::Integer) where {Algo <: DPAlgorithm}
+
+Simulate one sample path of a state variable. Called for 1-d dynamic programming.
+
+#Arguments
+
+- `res::CDPSolveResult`: Object that contains result of dynamic programming
+- `s_init::Real`: initial value of state variable
+- `ts_length::Integer`: Length of simulation
+"""
 simulate(res::CDPSolveResult{Algo,1}, s_init::Real,
          ts_length::Integer) where {Algo<:DPAlgorithm} =
     simulate(Random.GLOBAL_RNG, res, s_init, ts_length)
@@ -694,5 +709,17 @@ function simulate(rng::AbstractRNG, res::CDPSolveResult, s_init::Vector,
     return s_path
 end
 
+"""
+    simulate(res::CDPSolveResult, s_init::Vector,
+         ts_length::Integer) where {Algo <: DPAlgorithm}
+
+Simulate one sample path of a state variable. Called for multi-dimensional dynamic programming.
+
+#Arguments
+
+- `res::CDPSolveResult`: Object that contains result of dynamic programming
+- `s_init::Real`: initial value of state variable
+- `ts_length::Integer`: Length of simulation
+"""
 simulate(res::CDPSolveResult, s_init::Vector, ts_length::Integer) =
 simulate(Random.GLOBAL_RNG, res, s_init, ts_length)
