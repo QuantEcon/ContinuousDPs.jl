@@ -657,15 +657,6 @@ function simulate!(rng::AbstractRNG, s_path::TS,
     return s_path
 end
 
-
-
-"""
-    simulate!(s_path::VecOrMat{Float64}, res::CDPSolveResult, s_init)
-
-Wrapper function for simulate!(rng::AbstractRNG, s_path::TS,res::CDPSolveResult{Algo,N,TR,TS},s_init).
-
-NOTE: See `simulate!` for further details.
-"""
 simulate!(s_path::VecOrMat{Float64}, res::CDPSolveResult, s_init) =
     simulate!(Random.GLOBAL_RNG, s_path, res, s_init)
 
