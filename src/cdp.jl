@@ -1,11 +1,14 @@
 #=
 Tools for representing and solving dynamic programs with continuous states.
+
 Implement the Bellman equation collocation method as described in Mirand and
 Fackler (2002), Chapter 9.
+
 References
 ----------
 * M. J. Miranda and P. L. Fackler, Applied Computational Economics and Finance,
   MIT press, 2002.
+
 =#
 using BasisMatrices
 import Optim
@@ -436,8 +439,10 @@ function evaluate_policy!(cdp::ContinuousDP{N}, X::Vector{Float64},
         for (j, w) in enumerate(cdp.weights)
             e = cdp.shocks[(j, te...)...]
             s_next = cdp.g(s, X[i], e)
-            A[i, :] -= ckron([vec(evalbase(cdp.interp.basis.params[k], s_next[k]))
-                 for k in N:-1:1]...) * cdp.discount * w
+            A[i, :] -= ckron(
+                [vec(evalbase(cdp.interp.basis.params[k], s_next[k]))
+                 for k in N:-1:1]...
+            ) * cdp.discount * w
         end
     end
     A_lu = lu(A)
@@ -683,18 +688,6 @@ function simulate(rng::AbstractRNG, res::CDPSolveResult{Algo,1}, s_init::Real,
     return s_path
 end
 
-"""
-    simulate(res::CDPSolveResult{Algo,1}, s_init::Real,
-         ts_length::Integer) where {Algo <: DPAlgorithm}
-
-Simulate one sample path of a state variable. Called for 1-d dynamic programming.
-
-#Arguments
-
-- `res::CDPSolveResult`: Object that contains result of dynamic programming
-- `s_init::Real`: initial value of state variable
-- `ts_length::Integer`: Length of simulation
-"""
 simulate(res::CDPSolveResult{Algo,1}, s_init::Real,
          ts_length::Integer) where {Algo<:DPAlgorithm} =
     simulate(Random.GLOBAL_RNG, res, s_init, ts_length)
@@ -706,17 +699,5 @@ function simulate(rng::AbstractRNG, res::CDPSolveResult, s_init::Vector,
     return s_path
 end
 
-"""
-    simulate(res::CDPSolveResult, s_init::Vector,
-         ts_length::Integer) where {Algo <: DPAlgorithm}
-
-Simulate one sample path of a state variable. Called for multi-dimensional dynamic programming.
-
-#Arguments
-
-- `res::CDPSolveResult`: Object that contains result of dynamic programming
-- `s_init::Real`: initial value of state variable
-- `ts_length::Integer`: Length of simulation
-"""
 simulate(res::CDPSolveResult, s_init::Vector, ts_length::Integer) =
-simulate(Random.GLOBAL_RNG, res, s_init, ts_length)
+    simulate(Random.GLOBAL_RNG, res, s_init, ts_length)
