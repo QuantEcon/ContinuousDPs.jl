@@ -369,13 +369,16 @@ Update basis coefficients. Values are stored in `Tv`
 - `cdp::ContinuousDP`: Object that contains model parameters
 - `C::Vector{Float64}`: Basis coefficients vector
 - `Tv::Vector{Float64}`: Vector to store values
-
+- `v_init::Vector{Float64}`: Initial Guess for value function
 # Returns
 
 - `C::Vector{Float64}`: Updated basis coefficients vector
 """
 function bellman_operator!(cdp::ContinuousDP, C::Vector{Float64},
-                           Tv::Vector{Float64})
+                           Tv::Vector{Float64},;v_init::Vector{Float64} = nothing)
+    if v_init != nothing
+        ldiv!(C, cdp.interp.Phi_lu, v_init)
+    end
     Tv = s_wise_max!(cdp, cdp.interp.S, C, Tv)
     ldiv!(C, cdp.interp.Phi_lu, Tv)
     return C
@@ -471,7 +474,10 @@ Update basis coefficients by policy function iteration
 - `C::Vector{Float64}` Updated basis coefficients vector
 """
 function policy_iteration_operator!(cdp::ContinuousDP, C::Vector{Float64},
-                                    X::Vector{Float64})
+                                    X::Vector{Float64},;v_init::Vector{Float64}= nothing)
+    if v_init != nothing
+        ldiv!(C, cdp.interp.Phi_lu, v_init)
+    end
     compute_greedy!(cdp, C, X)
     evaluate_policy!(cdp, X, C)
     return C
@@ -489,6 +495,7 @@ Updates basis coefficients until it converges.
 - `C::Vector{Float64}`: initial basis coefficients vector
 - `tol::Float64`: Tolerance to be used to update basis coefficients
 - `max_iter::Int`: The maximum number of iteration
+- `v_init::Vector{Float64}`: Initial guess for value function
 - `verbose::Int`: Level of feedback (0 for no output, 1 for warnings only, 2 for
    warning and convergence messages during iteration)
 - `print_skip::Int`: if verbose == 2, how many iterations to apply between print
@@ -500,6 +507,7 @@ Updates basis coefficients until it converges.
 - `i::Int`: Number of iteration it took to converge
 """
 function operator_iteration!(T::Function, C::TC, tol::Float64, max_iter;
+                             v_init::Vector{Float64}=nothing,
                              verbose::Int=2, print_skip::Int=50) where TC
     converged = false
     i = 0
@@ -509,6 +517,10 @@ function operator_iteration!(T::Function, C::TC, tol::Float64, max_iter;
             @warn("No computation performed with max_iter=$max_iter")
         end
         return converged, i
+    end
+
+    if v_init != nothing
+        ldiv!(C, cdp.interp.Phi_lu, v_init)
     end
 
     err = tol + 1
@@ -557,6 +569,7 @@ Solve the continuous-state dynamic program
 - `method::Type{T<Algo}(PFI)`: Type name specifying solution method
    Acceptable arguments are 'VFI' for value function iteration or
    'PFI' for policy function iteration. Default solution method is 'PFI'.
+- `v_init::Vector{Float64}`: Initial guess for value function
 - `tol::Real`: Value for epsilon-optimality
 - `max_iter::Int`: Maximum number of iterations
 - `verbose::Int`: Level of feedback (0 for no output, 1 for warnings only, 2 for
@@ -569,12 +582,15 @@ Solve the continuous-state dynamic program
 - `res::CDPSolveResult{Algo,N,TR,TS}`: Object to store the result of dynamic
   programming
 """
-function solve(cdp::ContinuousDP{N,TR,TS}, method::Type{Algo}=PFI;
-               tol::Real=sqrt(eps()), max_iter::Integer=500,
-               verbose::Int=2,
+function solve(cdp::ContinuousDP{N,TR,TS}, method::Type{Algo}=PFI; 
+               v_init::Vector{Float64}=nothing, tol::Real=sqrt(eps()), 
+               max_iter::Integer=500, verbose::Int=2,
                print_skip::Int=50) where {Algo<:DPAlgorithm,N,TR,TS}
     tol = Float64(tol)
     res = CDPSolveResult{Algo,N,TR,TS}(cdp, tol, max_iter)
+    if v_init != nothing
+        ldiv!(res.C, cdp.interp.Phi_lu, v_init)
+    end
     _solve!(cdp, res, verbose, print_skip)
     evaluate!(res)
     return res
