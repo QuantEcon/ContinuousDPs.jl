@@ -1,6 +1,5 @@
 name = "ContinuousDPs"
 uuid = "c470661a-f883-5a79-ade0-a473a39194e2"
-authors = ["Daisuke Oyama <email@address.com>"]
 version = "0.1.0"
 
 [deps]
