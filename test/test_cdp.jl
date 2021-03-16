@@ -80,4 +80,39 @@
         end
     end
 
+    @testset "Initial value" begin
+        # Construct optimal growth model
+        n = 10
+        s_min, s_max = 5, 10
+        basis = Basis(LinParams(n, s_min, s_max))
+
+        alpha = 0.2
+        bet = 0.5
+        gamm = 0.9
+        sigma = 0.1
+        discount = 0.9;
+
+        x_star = ((discount * bet) / (1 - discount * gamm))^(1 / (1 - bet))
+        s_star = gamm * x_star + x_star^bet
+        s_star, x_star
+
+        f(s, x) = (s - x)^(1 - alpha) / (1 - alpha)
+        g(s, x, e) = gamm * x .+ e * x^bet;
+
+        n_shocks = 3
+        shocks, weights = zeros(3), ones(3) / 3.
+
+        x_lb(s) = 0
+        x_ub(s) = 0.99 * s;
+
+        cdp = ContinuousDP(f, g, discount, shocks, weights, x_lb, x_ub, basis)
+
+        # Compute coefficients once
+        v_init = π * ones(n)
+        res = solve(cdp, v_init=v_init, max_iter=0)
+
+        # Basis is identity matrix
+        @test isapprox(res.C, v_init)
+    end
+
 end
