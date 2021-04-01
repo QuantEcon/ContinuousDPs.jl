@@ -546,8 +546,9 @@ end
 #= Solve methods =#
 
 """
-    solve(cdp, method=PFI; tol=sqrt(eps()), max_iter=500, verbose=2,
-          print_skip=50)
+
+    solve(cdp, method=PFI; v_init=zeros(cdp.interp.length), tol=sqrt(eps()),
+        　max_iter=500, verbose=2,　print_skip=50)
 
 Solve the continuous-state dynamic program
 
@@ -557,6 +558,7 @@ Solve the continuous-state dynamic program
 - `method::Type{T<Algo}(PFI)`: Type name specifying solution method
    Acceptable arguments are 'VFI' for value function iteration or
    'PFI' for policy function iteration. Default solution method is 'PFI'.
+- `v_init::Vector{Float64}`: Initial guess for value function
 - `tol::Real`: Value for epsilon-optimality
 - `max_iter::Int`: Maximum number of iterations
 - `verbose::Int`: Level of feedback (0 for no output, 1 for warnings only, 2 for
@@ -569,12 +571,15 @@ Solve the continuous-state dynamic program
 - `res::CDPSolveResult{Algo,N,TR,TS}`: Object to store the result of dynamic
   programming
 """
+
 function solve(cdp::ContinuousDP{N,TR,TS}, method::Type{Algo}=PFI;
+               v_init::Vector{Float64}=zeros(cdp.interp.length),
                tol::Real=sqrt(eps()), max_iter::Integer=500,
                verbose::Int=2,
                print_skip::Int=50) where {Algo<:DPAlgorithm,N,TR,TS}
     tol = Float64(tol)
     res = CDPSolveResult{Algo,N,TR,TS}(cdp, tol, max_iter)
+    ldiv!(res.C, cdp.interp.Phi_lu, v_init)
     _solve!(cdp, res, verbose, print_skip)
     evaluate!(res)
     return res
