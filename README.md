@@ -1,6 +1,6 @@
 # ContinuousDPs.jl
 
-[![Build Status](https://travis-ci.com/QuantEcon/ContinuousDPs.jl.svg?branch=master)](https://travis-ci.com/QuantEcon/ContinuousDPs.jl)
+[![Build Status](https://github.com/QuantEcon/ContinuousDPs.jl/actions/workflows/ci.yml/badge.svg)](https://github.com/QuantEcon/ContinuousDPs.jl/actions/workflows/ci.yml)
 [![Coverage Status](https://coveralls.io/repos/github/QuantEcon/ContinuousDPs.jl/badge.svg)](https://coveralls.io/github/QuantEcon/ContinuousDPs.jl)
 [![codecov](https://codecov.io/gh/QuantEcon/ContinuousDPs.jl/branch/master/graph/badge.svg)](https://codecov.io/gh/QuantEcon/ContinuousDPs.jl)
 
