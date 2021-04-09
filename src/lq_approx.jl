@@ -11,7 +11,7 @@ References
 import QuantEcon.LQ, QuantEcon.ScalarOrArray
 
 """
-    approx_lq(s_star, x_star, f_star, Df_star, D²f_star, g_star, Dg_star,
+    approx_lq(s_star, x_star, f_star, Df_star, DDf_star, g_star, Dg_star,
               discount)
 
 Return an approximating LQ instance.
@@ -22,8 +22,8 @@ Return an approximating LQ instance.
 - `f_star::Real`: Reward function evaluated at the steady-state
 - `Df_star::AbstractVector{T}`: Gradient of f satisfying
   `Df_star = [f_s', f_x']`
-- `D²f_star::AbstractMatrix{T}`: Hessian of f satisfying
-  `D²f_star::Array = [f_ss f_sx; f_xs f_xx]`
+- `DDf_star::AbstractMatrix{T}`: Hessian of f satisfying
+  `DDf_star::Array = [f_ss f_sx; f_xs f_xx]`
 - `g_star::ScalarOrArray{T}`: State transition function evaluated at the
   steady-state
 - `Dg_star::AbstractMatrix{T}`: Jacobian of g satisfying `Dg_star = [g_s, g_x]`
@@ -32,7 +32,7 @@ Return an approximating LQ instance.
 """
 function approx_lq(s_star::ScalarOrArray{T}, x_star::ScalarOrArray{T},
                    f_star::Real, Df_star::AbstractVector{T},
-                   D²f_star::AbstractMatrix{T}, g_star::ScalarOrArray{T},
+                   DDf_star::AbstractMatrix{T}, g_star::ScalarOrArray{T},
                    Dg_star::AbstractMatrix{T}, discount::Real) where T
 
     n = length(s_star)   # Dim of state variable s
@@ -42,8 +42,8 @@ function approx_lq(s_star::ScalarOrArray{T}, x_star::ScalarOrArray{T},
 
     # Unpack derivatives
     f_s, f_x = Df_star[1:n, :]', Df_star[n+1:end, :]'
-    f_ss, f_xs = D²f_star[1:n, 1:n], D²f_star[n+1:end, 1:n]
-    f_sx, f_xx = D²f_star[1:n, n+1:end], D²f_star[n+1:end, n+1:end]
+    f_ss, f_xs = DDf_star[1:n, 1:n], DDf_star[n+1:end, 1:n]
+    f_sx, f_xx = DDf_star[1:n, n+1:end], DDf_star[n+1:end, n+1:end]
     g_s, g_x = Dg_star[:, 1:n], Dg_star[:, n+1:end]
 
     # Initialize arrays
@@ -55,7 +55,7 @@ function approx_lq(s_star::ScalarOrArray{T}, x_star::ScalarOrArray{T},
     N = Array{T}(undef, m, nb_states)
 
     # (1, s)' R (1, s) + 2 x' N (1, s) + x' Q x
-    R[1, 1] = -(f_star - Df_star' * z_star + z_star' * D²f_star * z_star / 2)
+    R[1, 1] = -(f_star - Df_star' * z_star + z_star' * DDf_star * z_star / 2)
     R[2:end, 1] = -(f_s' - (f_ss * s_star + f_sx * x_star)) / 2
     R[1, 2:end] = -(f_s - (s_star' * f_ss + (f_sx * x_star)')) / 2
     R[2:end, 2:end] = -f_ss / 2
