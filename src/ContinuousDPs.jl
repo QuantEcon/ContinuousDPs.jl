@@ -14,6 +14,6 @@ include("cdp.jl")
 include("lq_approx.jl")
 
 export
-    ContinuousDP, evaluate_policy!, set_eval_nodes!, simulate, approx_lq
+    ContinuousDP, evaluate_policy!, set_eval_nodes!, simulate, approx_lq, LQA
 
 end # module

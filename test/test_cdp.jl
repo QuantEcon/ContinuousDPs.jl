@@ -80,6 +80,55 @@
         end
     end
 
+    @testset "LQ control" begin
+        using QuantEcon
+
+        A = [1.0 0.0;
+             -0.5 0.9];
+
+        R = [5.0 0.0;
+             0.0 0.3]
+
+        N = [0.05 0.1]
+
+        Q = 0.1;
+
+        C = 0.0;
+
+        B = [0.0; 1.5];
+
+        f(s, x) = -([1, s...]' * R * [1, s...] .+ x' * Q * x .+
+                    2 * x' * N * [1, s...])[1];
+        g(s, x, e) = (A * [1, s...] + B * x)[2];
+
+        point = (5.0, 0.0, 0.0);
+
+        discount = 0.9;
+        lq = QuantEcon.LQ(Q, R, A, B, C, N, bet=discount);
+        P, F, d = stationary_values(lq);
+        v_star(s) = -([1, s...]' * P * [1, s...] + d)
+        x_star(s) = -(F * [1, s...])[1];
+
+        n = 100
+        s_min, s_max = -5.0, 10.
+        basis = Basis(LinParams(n, s_min, s_max))
+
+        x_lb(s) = -20.0
+        x_ub(s) = 5.0;
+
+        shocks = [0.]
+        weights = [1.]
+
+        cdp = ContinuousDP(f, g, discount, shocks, weights, x_lb, x_ub, basis)
+
+        res_lqa = @inferred(solve(cdp, LQA, point=point));
+        rtol = 1e-2
+
+        @test isapprox(res_lqa.V, v_star.(cdp.interp.S); rtol=rtol)
+        @test isapprox(res_lqa.X, x_star.(cdp.interp.S); rtol=rtol)
+
+    end
+
     @testset "Initial value" begin
         # Construct optimal growth model
         n = 10
@@ -113,6 +162,7 @@
 
         # Basis is identity matrix
         @test isapprox(res.C, v_init)
+
     end
 
 end
