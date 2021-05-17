@@ -12,6 +12,8 @@ References
 =#
 using BasisMatrices
 import Optim
+using FiniteDiff
+import QuantEcon.ScalarOrArray
 
 
 #= Types and contructors =#
@@ -556,8 +558,9 @@ Solve the continuous-state dynamic program
 
 - `cdp::ContinuousDP`: Object that contains model parameters
 - `method::Type{T<Algo}(PFI)`: Type name specifying solution method
-   Acceptable arguments are 'VFI' for value function iteration or
-   'PFI' for policy function iteration. Default solution method is 'PFI'.
+   Acceptable arguments are 'VFI' for value function iteration,
+   'PFI' for policy function iteration, or 'LQA' for linear quadratic
+   approximation. Default solution method is 'PFI'.
 - `v_init::Vector{Float64}`: Initial guess for value function
 - `tol::Real`: Value for epsilon-optimality
 - `max_iter::Int`: Maximum number of iterations
@@ -565,6 +568,9 @@ Solve the continuous-state dynamic program
    warning and convergence messages during iteration)
 - `print_skip::Int`: if verbose == 2, how many iterations to apply between print
   messages
+- `point::Tuple{ScalarOrArray, ScalarOrArray, ScalarOrArray}`: if `method` is
+ `LQA`, point around which the approximation is constructed. The order of
+ variables should match the order of arguments of `cdp.g`
 
 # Returns
 
@@ -576,11 +582,12 @@ function solve(cdp::ContinuousDP{N,TR,TS}, method::Type{Algo}=PFI;
                v_init::Vector{Float64}=zeros(cdp.interp.length),
                tol::Real=sqrt(eps()), max_iter::Integer=500,
                verbose::Int=2,
-               print_skip::Int=50) where {Algo<:DPAlgorithm,N,TR,TS}
+               print_skip::Int=50,
+               kwargs...) where {Algo<:DPAlgorithm,N,TR,TS}
     tol = Float64(tol)
     res = CDPSolveResult{Algo,N,TR,TS}(cdp, tol, max_iter)
     ldiv!(res.C, cdp.interp.Phi_lu, v_init)
-    _solve!(cdp, res, verbose, print_skip)
+    _solve!(cdp, res, verbose, print_skip; kwargs...)
     evaluate!(res)
     return res
 end
@@ -621,6 +628,62 @@ function _solve!(cdp::ContinuousDP, res::CDPSolveResult{VFI},
     return res
 end
 
+# Linear Quadratic Approximation
+struct LQA <: DPAlgorithm end
+
+"""
+    _solve!(cdp, res, verbose, print_skip; point)
+
+Implement linear quadratic approximation. See `solve` for further details.
+"""
+function _solve!(cdp::ContinuousDP,
+                 res::CDPSolveResult{LQA},
+                 verbose, print_skip;
+                 point::Tuple{ScalarOrArray, ScalarOrArray, ScalarOrArray})
+    # Unpack point
+    s_star, x_star, e_star = point
+
+    jacobian = FiniteDiff.finite_difference_jacobian
+    gradient = FiniteDiff.finite_difference_gradient
+    hessian = FiniteDiff.finite_difference_hessian
+
+    # Compute zero-th order terms
+    f_star = cdp.f(s_star, x_star);
+    g_star = cdp.g(s_star, x_star, e_star);
+    z_star = [s_star..., x_star...]
+
+    # Compute derivatives -- need to handle scalar and vector cases separately
+    s_is_nb = isa(s_star, Number)
+    x_is_nb = isa(x_star, Number)
+
+    n = length(s_star)
+    m = length(x_star)
+    s_range = s_is_nb ? 1 : 1:n
+    x_range = x_is_nb ? n+1 : n+1:n+m
+
+    f_vec = z -> cdp.f(z[s_range], z[x_range])
+    g_vec = z -> cdp.g(z[s_range], z[x_range], e_star)
+
+    Df_star = gradient(f_vec, z_star)
+    DDf_star = hessian(f_vec, z_star)
+    Dg_star = s_is_nb ? gradient(g_vec, z_star)' : jacobian(g_vec, z_star)
+
+    # Construct LQ approximation instance
+    lq = approx_lq(s_star, x_star, f_star, Df_star, DDf_star, g_star, Dg_star,
+                   cdp.discount)
+
+    # Solve LQ problem
+    P, F, d = stationary_values(lq)
+
+    # Compute value function
+    v(s) = -([1, s...]' * P * [1, s...] + d)
+    v_vals = [v(cdp.interp.S[i, :]) for i in 1:length(cdp.interp.basis)]
+
+    # Back out basis coefficients
+    ldiv!(res.C, cdp.interp.Phi_lu, v_vals)
+
+    res.converged = true
+end
 
 #= Simulate methods =#
 
