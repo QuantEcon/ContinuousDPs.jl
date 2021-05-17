@@ -677,7 +677,7 @@ function _solve!(cdp::ContinuousDP,
 
     # Compute value function
     v(s) = -([1, s...]' * P * [1, s...] + d)
-    v_vals = [v(cdp.interp.S[i, :]) for i ∈ 1:length(cdp.interp.basis)]
+    v_vals = [v(cdp.interp.S[i, :]) for i in 1:length(cdp.interp.basis)]
 
     # Back out basis coefficients
     ldiv!(res.C, cdp.interp.Phi_lu, v_vals)
