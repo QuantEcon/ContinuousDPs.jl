@@ -11,5 +11,6 @@ QuantEcon = "fcd29c91-0bd7-5a09-975d-7ac3f643a60c"
 Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
 
 [compat]
+BasisMatrices = "0.7"
 Optim = "1"
 julia = "1.2"
