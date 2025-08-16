@@ -6,3 +6,6 @@ Manifest.toml
 
 # Jupyter Notebook
 .ipynb_checkpoints
+
+# Documentation builds
+docs/build/
