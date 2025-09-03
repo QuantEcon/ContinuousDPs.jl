@@ -9,7 +9,7 @@ makedocs(;
     sitename="ContinuousDPs.jl",
     format=Documenter.HTML(;
         canonical="https://QuantEcon.github.io/ContinuousDPs.jl",
-        edit_link="master",
+        edit_link="main",
         assets=String[],
     ),
     pages=[
@@ -22,5 +22,5 @@ makedocs(;
 
 deploydocs(;
     repo="github.com/QuantEcon/ContinuousDPs.jl",
-    devbranch="master",
+    devbranch="main",
 )
