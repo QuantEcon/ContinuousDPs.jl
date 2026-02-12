@@ -82,16 +82,41 @@
 
     @testset "Santos (1999) Sec. 7.3: stochastic growth w/ leisure (2D state, 1D control) benchmarks" begin
         # Model parameters (as in Santos, 1999, Sec. 7.3)
+        struct Santos1999Params
+            beta::Float64
+            gamma::Float64
+            A::Float64
+            alpha::Float64
+            delta::Float64
+            rho::Float64
+            sigma_epsilon::Float64
+        end
+        
+        """
+        Default parameters from Santos (1999) Section 7.3, Table 16
+        """
+        function default_params()
+            return Santos1999Params(
+                0.95, 1/3, 10.0, 0.34, 1.0, 0.90, 0.008
+            )
+        end
 
+        # State domains (as in Santos, 1999, Sec. 7.3)
+        logz_min, logz_max = -0.32, 0.32
+        k_min, k_max = 0.10, 10.0
+
+        # For numerical stability
+        x_lb(s), x_ub(s) = 1e-10, 1 - 1e-10
+        
         # Model functions
         # Production and Santos (7.4)-style mapping: given leisure l -> (c, k')
+
+        # Shocks and weights (Gauss-Hermite quadrature)
+
 
         # Analytical solution (delta = 1)
 
         # Tests
-
-
-
 
         
 
