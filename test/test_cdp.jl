@@ -198,13 +198,20 @@
         # Tests
         # Test 1: Parameter construction
 	    @testset "Parameter construction and validation" begin
+            # Test valid parameters
             @test_nowarn Santos1999Params(0.95, 1/3, 10.0, 0.34, 1.0, 0.90, 0.008)
 
+            # Test default parameters
             params = default_params()
             @test params.beta == 0.95
             @test params.gamma == 1/3
             @test params.delta == 1.0
 
+            # Test invalid parameters
+            # beta >= 1
+            @test_throws AssertionError Santos1999Params(1.5, 1/3, 10.0, 0.34, 1.0, 0.90, 0.008)
+            # gamma < 0
+            @test_throws AssertionError Santos1999Params(0.95, -0.3, 10.0, 0.34, 1.0, 0.90, 0.008)
 	    end
 
 
