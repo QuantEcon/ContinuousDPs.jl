@@ -33,7 +33,7 @@ logz_min, logz_max = -0.32, 0.32
 k_min, k_max = 0.10, 10.0
 
 # For numerical stability
-#x_lb(s), x_ub(s) = 1e-10, 1 - 1e-10
+x_lb(s), x_ub(s) = 1e-10, 1 - 1e-10
 
 # Model functions
 # Production and Santos (7.4)-style mapping: given leisure l -> (c, k')
@@ -42,6 +42,8 @@ function build_production(params::Santos1999Params)
     function y(k, z, l)
         return z * params.A * k^params.alpha * (1 - l)^(1 - params.alpha)
     end
+
+    return y
 end
 
 # Calculate consumption and k prime based on Santos equation (7.4) ("unidimensional maximization")
@@ -49,6 +51,8 @@ function build_c_from_l(params::Santos1999Params)
     function c_from_l(k, z, l)
         return z * params.A * k^params.alpha * (1 - l)^(-params.alpha) * (params.lambda / (1 - params.lambda)) * (1 - params.alpha) * l
     end
+
+    return c_from_l
 end
 
 function build_kprime_from_l(params::Santos1999Params)
@@ -59,7 +63,7 @@ function build_kprime_from_l(params::Santos1999Params)
         return y(k, z, l) + (1 - params.delta) * k - c_from_l(k, z, l)
     end
 
-    return y
+    return kprime_from_l
 end
 
 # Reward function
@@ -80,6 +84,8 @@ function build_reward_function(params::Santos1999Params)
         end
         return params.lambda*log(c) + (1 - params.lambda)*log(l)
     end
+
+    return f
 end
 
 # Transition function
@@ -93,6 +99,8 @@ function build_transition_function(params::Santos1999Params)
         logzp = params.rho*logz + e
         return (kp, logzp)
     end
+
+    return g
 end
 
 # Analytical solution (delta = 1)
@@ -106,15 +114,18 @@ function analytical_solution(params::Santos1999Params)
     
     # Value function: V(k, z) = B + C*log(k) + D*log(z)
     C = params.lambda * params.alpha / (1 - ab)
-    D = params.lambda / ((1 - ab) * (1 - params.rho * beta))
+    D = params.lambda / ((1 - ab) * (1 - params.rho * params.beta))
     
-    const_term = params.lambda * (log(1 - ab) + log(A) + (1 - params.alpha) * log(1 - l_star)) + (1 - params.lambda) * log(l_star) + params.beta * C * (log(ab) + log(A) + (1-params.alpha) * log(1 - l_star))
-    B = const_term / (1 - beta)
+    const_term = params.lambda * (log(1 - ab) + log(params.A) + (1 - params.alpha) * log(1 - l_star)) + (1 - params.lambda) * log(l_star) + params.beta * C * (log(ab) + log(params.A) + (1-params.alpha) * log(1 - l_star))
+    B = const_term / (1 - params.beta)
 
     # Policy function (consant fraction of production)
     policy(k, logz) = ab * exp(logz) * params.A * k^params.alpha * (1 - l_star)^(1 - params.alpha)
 
-    return B, C, D, l_star, policy
+    # Value function
+    v_star(k, logz) = B + C * log(k) + D * logz
+
+    return B, C, D, l_star, policy, v_star
 end
 
 
@@ -141,7 +152,7 @@ end
     # Test 2: Analytical solution (delta = 1) properties
     @testset "Analytical solution propoerties" begin
         params = default_params()
-        B, C, D, l_star, policy = analytical_solution(params)
+        B, C, D, l_star, policy, v_star = analytical_solution(params)
 
         # Check coefficients
         @test C > 0
@@ -166,8 +177,7 @@ end
         g = build_transition_function(params)
 
         # Constuct analytical solutions
-        B, C, D, l_star, policy = analytical_solution(params)
-        v_star(k, logz) = B + C * log(k) + D * logz
+        B, C, D, l_star, policy, v_star = analytical_solution(params)
 
         # Method types
         methods = [VFI, PFI]
@@ -192,32 +202,35 @@ end
                     basis = basis_builder()
                     
                     # Build DP
-                    cdp = ContinuousDP(f, g, params.beta, shocks, weights, s -> 1e-10, s -> 1 - 1e-10, basis)
+                    cdp = ContinuousDP(f, g, params.beta, shocks, weights, x_lb, x_ub, basis)
                     
                     # Analytical targets on interpolation nodes
                     S = cdp.interp.S
-                    v_star_on_S = [v_star(row) for row in eachrow(S)]
-                    k_prime_star_on_S = [policy(row) for row in eachrow(S)]
+                    k_nodes = @view S[:, 1]
+                    logz_nodes = @view S[:, 2]
+                    v_star_on_S = v_star.(k_nodes, logz_nodes)
+                    k_prime_star_on_S = policy.(k_nodes, logz_nodes)
                     
                     # Solve DP
-                    res = solve(cdp, method, max_iter=500, tol=sqrt(eps()),print_level=0)
+                    res = solve(cdp, method, max_iter=500, tol=sqrt(eps()), verbose=0)
                     results[test_name] = res
                     l_hat = vec(res.X)
 
                     # Convergence tests
                     @test res.converged
-                    @test res.iter < 500
+                    @test res.num_iter < 500
 
                     # Value function finite test
-                    @test all(isfinite.(res.Vf))
+                    @test all(isfinite.(res.V))
 
                     # Policy (leisure) shold be in bounds
-                    @test all(x_lb .<= res.X .<= x_ub)
+                    lb = x_lb(S[1, :])
+                    ub = x_ub(S[1, :])
+                    @test all((lb .<= res.X) .& (res.X .<= ub))
 
-                    # 
                     println("=== $test_name vs Santos(1999) analytical solution benchmark (delta = 1) ===")
                     # Iteration number check
-                    println("$test_name: converged in $(res.iter) iterations")
+                    println("$test_name: converged in $(res.num_iter) iterations")
 
                     # Policy function benchmark check
                     println("Analytical l* = ", l_star)
@@ -225,7 +238,7 @@ end
                     println("max |l_hat - l_star| = ", maximum(abs.(l_hat .- l_star)))
 
                     # Value function benchmark check
-                    println("max |V_hat - V_star| = ", maximum(abs.(res.Vf .- v_star_on_S)))
+                    println("max |V_hat - V_star| = ", maximum(abs.(res.V .- v_star_on_S)))
                 end
             end
         end
@@ -241,7 +254,7 @@ end
                 @test pf_diff < 0.1
 
                 # Value function difference test
-                vf_diff = maximum(abs.(res_vfi.Vf - res_pfi.Vf))
+                vf_diff = maximum(abs.(res_vfi.V - res_pfi.V))
                 @test vf_diff < 0.5
 
                 println("VFI vs PFI : max policy diff = $pf_diff, max value diff = $vf_diff")
