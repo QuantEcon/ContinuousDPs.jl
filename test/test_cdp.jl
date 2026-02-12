@@ -162,10 +162,29 @@
             end
         end
 
-        # Shocks and weights (Gauss-Hermite quadrature)
-
-
         # Analytical solution (delta = 1)
+        function analytical_solution(params::Santos73Params)
+            @assert params.delta = 1.0 "Analytical solution is only for delta = 1"
+
+            ab = params.alpha * params.beta
+
+            # Optimal leisure (constant)
+            l_star = ((1 - params.lambda)*(1 - ab)) / (params.lambda*(1 - params.alpha) + ((1 - params.lambda)*(1 - ab)))
+            
+            # Value function: V(k, z) = B + C*log(k) + D*log(z)
+            C = params.lambda * params.alpha / (1 - ab)
+            D = params.lambda / ((1 - ab) * (1 - params.rho * beta))
+            
+            const_term = params.lambda * (log(1 - ab) + log(A) + (1 - params.alpha) * log(1 - l_star)) + (1 - params.lambda) * log(l_star) + params.beta * C * (log(ab) + log(A) + (1-params.alpha) * log(1 - l_star))
+            B = const_term / (1 - beta)
+
+            # Policy function (consant fraction of production)
+            policy(k, z) = ab & exp(logz) * params.A * k^params.alpha * (1 - l_star)^(1 - params.alpha)
+
+            return B, C, D, l_star, policy
+        end
+
+
 
         # Tests
 
