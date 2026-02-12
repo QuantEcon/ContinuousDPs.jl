@@ -231,26 +231,73 @@
             params = default_params()
 
             # Grid setup
+            nk, nlogz = 5, 5
 
             # Shock discretization (Gauss-Hermite quadrature)
+            n_shocks = 7
+            shocks, weights = qnwnorm(n_shocks, 0.0, params.sigma_epsilon^2)
 
             # Build functions
+            f = build_reward_function(params)
+            g = build_transition_function(params)
 
             # Method types
+            methods = [VFI, PFI]
+            method_names = ["VFI", "PFI"]
 
             # Interpolation types
+            interp_types = [
+                ("Linear", () -> Basis(LinParams(nk, k_min, k_max), LinParams(nlogz, logz_min, logz_max)))
+                ("Spline", () -> Basis(SplineParams(collect(range(k_min, k_max, length=nk)), 0, 3), SplineParams(collect(range(logz_min, logz_max, length=nlogz)), 0, 3)))
+                ("Chebyshev", () -> Basis(ChebParams(nk, k_min, k_max), ChebParams(nlogz, logz_min, logz_max)))
+            ]
 
             # Test each combination
-            
+            results = Dict()
+
+            for (method, method_names) in zip(method, method_names)
+                for (interp_name, basis_builder) in interp_types
+                    test_name = "$method_name + $interp_name"
+
+                    @testset "$test_name" begin
+                        basis = basis_builder()
+                        cdp = ContinuousDP(f, g, params.beta, shocks, weights, x_lb, x_ub, basis)
+                        res = solve(cdp, method, max_iter=500, tol=sqrt(eps()))
+                        results[test_name] = res
+
+                        # Convergence testset
+                        @test res.converged
+                        @test res.iter < 500
+
+                        # Value function finite test
+                        @test all(isfinite.(res.Vf))
+
+                        # Policy (leisure) shold be in bounds
+                        @test all (x_lb .<= res.X .<= x_ub)
+
+                        println("  $test_name: converged in $(res.iter) iterations")
+                    end
+                end
+            end
+
+            # Compare methods
+            @testset "Cross-method consistency" begin
+                if haskey(results, "VFI + Chebyshev") && haskey(rsults, "PFI + Chebyshev")
+                    res_vfi = results["VFI + Chebyshev"]
+                    res_pfi = results["PFI + Chebyshev"]
+
+                    # Policy function difference test
+                    pf_diff = maximum(abs.(res_vfi.X - res_pfi.X))
+                    @test pf_diff < 0.1
+
+                    # Value function difference test
+                    vf_diff = maximum(abs.(res_vfi.Vf - res_pfi.Vf))
+                    @test vf_diff < 0.5
+
+                    println("VFI vs PFI : max policy diff = $pf_diff, max value diff = $vf_diff")
+                end
+            end
         end
-            
-        end
-
-
-
-
-        
-
     end
 
 
