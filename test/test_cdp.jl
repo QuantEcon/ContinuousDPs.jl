@@ -95,11 +95,7 @@
         """
         Default parameters from Santos (1999) Section 7.3, Table 16
         """
-        function default_params()
-            return Santos1999Params(
-                0.95, 1/3, 10.0, 0.34, 1.0, 0.90, 0.008
-            )
-        end
+        default_params() = Santos1999Params(0.95, 1/3, 10.0, 0.34, 1.0, 0.90, 0.008)
 
         # State domains (as in Santos, 1999, Sec. 7.3)
         logz_min, logz_max = -0.32, 0.32
