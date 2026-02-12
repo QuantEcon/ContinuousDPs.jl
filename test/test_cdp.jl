@@ -214,6 +214,18 @@
             @test_throws AssertionError Santos1999Params(0.95, -0.3, 10.0, 0.34, 1.0, 0.90, 0.008)
 	    end
 
+        # Test 2: Analytical solution (delta = 1) properties
+        @testset "Analytical solution propoerties" begin
+            params = default_params()
+            B, C, D, l_star, policy = analytical_solution(params)
+
+            # Check coefficients
+            @test C > 0
+            @test D > 0
+            @test 0 < l_star < 1
+
+        end
+
 
 
 
