@@ -80,6 +80,24 @@
         end
     end
 
+    @testset "Santos (1999) Sec. 7.3: stochastic growth w/ leisure (2D state, 1D control) benchmarks" begin
+        # Model parameters (as in Santos, 1999, Sec. 7.3)
+
+        # Model functions
+        # Production and Santos (7.4)-style mapping: given leisure l -> (c, k')
+
+        # Analytical solution (delta = 1)
+
+        # Tests
+
+
+
+
+        
+
+    end
+
+
     @testset "LQ control" begin
         using QuantEcon
 
