@@ -6,3 +6,4 @@ using Test
 
 include("test_cdp.jl")
 include("test_lq_approx.jl")
+include("test_santos1999_s73.jl")
