@@ -80,121 +80,124 @@
         end
     end
 
+    # ==================================================
+    # Santos (1999) Section 7.3 Tests
+    # ==================================================
+    # Model parameters (as in Santos, 1999, Sec. 7.3)
+    struct Santos1999Params
+        beta::Float64
+        gamma::Float64
+        A::Float64
+        alpha::Float64
+        delta::Float64
+        rho::Float64
+        sigma_epsilon::Float64
+
+        function Santos1999params(beta, gamma, A, alpha, delta, rho, sigma_epsilon)
+            @assert 0 < beta < 1 "beta must be in (0,1)"
+            @assert 0 < gamma <= 1 "gamma must be in (0,1]"
+            @assert A > 0 "A must be positive "
+            @assert 0 < alpha < 1 "alpha must be in (0,1)"
+            @assert 0 <= delta <= 1 "delta must be in [0,1]"
+            @assert 0 <= rho < 1 "rho must be in [0, 1)"
+            @assert sigma_epsilon >= 0 "sigma_epsilon must be non-negative"
+            new(beta, gamma, A, alpha, delta, rho, sigma_epsilon)
+        end
+    end
+    
+    """
+    Default parameters from Santos (1999) Section 7.3, Table 16
+    """
+    default_params() = Santos1999Params(0.95, 1/3, 10.0, 0.34, 1.0, 0.90, 0.008)
+
+    # State domains (as in Santos, 1999, Sec. 7.3)
+    logz_min, logz_max = -0.32, 0.32
+    k_min, k_max = 0.10, 10.0
+
+    # For numerical stability
+    #x_lb(s), x_ub(s) = 1e-10, 1 - 1e-10
+    
+    # Model functions
+    # Production and Santos (7.4)-style mapping: given leisure l -> (c, k')
+    # Output
+    function build_production(params::Santos1999Params)
+        function y(k, z, l)
+            return z * params.A * k^params.alpha * (1 - l)^(1 - params.alpha)
+        end
+    end
+
+    # Calculate consumption and k prime based on Santos equation (7.4) ("unidimensional maximization")
+    function build_c_from_l(params::Santos1999Params)
+        function c_from_l(k, z, l)
+            return z * params.A * k^params.alpha * (1 - l)^(-params.alpha) * (params.lambda / (1 - params.lambda)) * (1 - params.alpha) * l
+        end
+    end
+
+    function build_kprime_from_l(params::Santos1999Params)
+        y = build_production(params)
+        c_from_l = build_c_from_l(params)
+
+        function kprime_from_l(k, z, l)
+            return y(k, z, l) + (1 - params.delta) * k - c_from_l(k, z, l)
+        end
+    end
+
+    # Reward function
+    function build_reward_function(params::Santos1999Params)
+        c_from_l = build_c_from_l(params)
+        kprime_from_l = build_kprime_from_l(params)
+
+        function f(s, l) 
+            k, logz = s
+            z = exp(logz)
+            if !(0 < l < 1)
+                return -Inf
+            end
+            c = c_from_l(k, z, l)
+            kp = kprime_from_l(k, z, l)
+            if c <= 0 || kp < 0
+                return -Inf
+            end
+            return params.lambda*log(c) + (1 - params.lambda)*log(l)
+        end
+    end
+
+    # Transition function
+    function build_transition_function(params::Santos1999Params)
+        kprime_from_l = build_kprime_from_l(params)
+
+        function g(s, l, e)
+            k, logz = s
+            z = exp(logz)
+            kp = kprime_from_l(k, z, l)
+            logzp = params.rho*logz + e
+            return (kp, logzp)
+        end
+    end
+
+    # Analytical solution (delta = 1)
+    function analytical_solution(params::Santos1999Params)
+        @assert params.delta == 1.0 "Analytical solution is only for delta = 1"
+
+        ab = params.alpha * params.beta
+
+        # Optimal leisure (constant)
+        l_star = ((1 - params.lambda)*(1 - ab)) / (params.lambda*(1 - params.alpha) + ((1 - params.lambda)*(1 - ab)))
+        
+        # Value function: V(k, z) = B + C*log(k) + D*log(z)
+        C = params.lambda * params.alpha / (1 - ab)
+        D = params.lambda / ((1 - ab) * (1 - params.rho * beta))
+        
+        const_term = params.lambda * (log(1 - ab) + log(A) + (1 - params.alpha) * log(1 - l_star)) + (1 - params.lambda) * log(l_star) + params.beta * C * (log(ab) + log(A) + (1-params.alpha) * log(1 - l_star))
+        B = const_term / (1 - beta)
+
+        # Policy function (consant fraction of production)
+        policy(k, logz) = ab & exp(logz) * params.A * k^params.alpha * (1 - l_star)^(1 - params.alpha)
+
+        return B, C, D, l_star, policy
+    end
+
     @testset "Santos (1999) Sec. 7.3: stochastic growth w/ leisure (2D state, 1D control) benchmarks" begin
-        # Model parameters (as in Santos, 1999, Sec. 7.3)
-        struct Santos1999Params
-            beta::Float64
-            gamma::Float64
-            A::Float64
-            alpha::Float64
-            delta::Float64
-            rho::Float64
-            sigma_epsilon::Float64
-
-            function Santos1999params(beta, gamma, A, alpha, delta, rho, sigma_epsilon)
-                @assert 0 < beta < 1 "beta must be in (0,1)"
-                @assert 0 < gamma <= 1 "gamma must be in (0,1]"
-                @assert A > 0 "A must be positive "
-                @assert 0 < alpha < 1 "alpha must be in (0,1)"
-                @assert 0 <= delta <= 1 "delta must be in [0,1]"
-                @assert 0 <= rho < 1 "rho must be in [0, 1)"
-                @assert sigma_epsilon >= 0 "sigma_epsilon must be non-negative"
-                new(beta, gamma, A, alpha, delta, rho, sigma_epsilon)
-            end
-        end
-        
-        """
-        Default parameters from Santos (1999) Section 7.3, Table 16
-        """
-        default_params() = Santos1999Params(0.95, 1/3, 10.0, 0.34, 1.0, 0.90, 0.008)
-
-        # State domains (as in Santos, 1999, Sec. 7.3)
-        logz_min, logz_max = -0.32, 0.32
-        k_min, k_max = 0.10, 10.0
-
-        # For numerical stability
-        x_lb(s), x_ub(s) = 1e-10, 1 - 1e-10
-        
-        # Model functions
-        # Production and Santos (7.4)-style mapping: given leisure l -> (c, k')
-        # Output
-        function build_production(params::Santos1999Params)
-            function y(k, z, l)
-                return z * params.A * k^params.alpha * (1 - l)^(1 - params.alpha)
-            end
-        end
-
-        # Calculate consumption and k prime based on Santos equation (7.4) ("unidimensional maximization")
-        function build_c_from_l(params::Santos1999Params)
-            function c_from_l(k, z, l)
-                return z * params.A * k^params.alpha * (1 - l)^(-params.alpha) * (params.lambda / (1 - params.lambda)) * (1 - params.alpha) * l
-            end
-        end
-
-        function build_kprime_from_l(params::Santos1999Params)
-            y = build_production(params)
-            c_from_l = build_c_from_l(params)
-
-            function kprime_from_l(k, z, l)
-                return y(k, z, l) + (1 - params.delta) * k - c_from_l(k, z, l)
-            end
-        end
-
-        # Reward function
-        function build_reward_function(params::Santos73Params)
-            c_from_l = build_c_from_l(params)
-            kprime_from_l = build_kprime_from_l(params)
-
-            function f(s, l) 
-                k, logz = s
-                z = exp(logz)
-                if !(0 < l < 1)
-                    return -Inf
-                end
-                c = c_from_l(k, z, l)
-                kp = kprime_from_l(k, z, l)
-                if c <= 0 || kp < 0
-                    return -Inf
-                end
-                return params.lambda*log(c) + (1 - params.lambda)*log(l)
-            end
-        end
-
-        # Transition function
-        function build_transition_function(params::Santos73Params)
-            kprime_from_l = build_kprime_from_l(params)
-
-            function g(s, l, e)
-                k, logz = s
-                z = exp(logz)
-                kp = kprime_from_l(k, z, l)
-                logzp = params.rho*logz + e
-                return (kp, logzp)
-            end
-        end
-
-        # Analytical solution (delta = 1)
-        function analytical_solution(params::Santos73Params)
-            @assert params.delta == 1.0 "Analytical solution is only for delta = 1"
-
-            ab = params.alpha * params.beta
-
-            # Optimal leisure (constant)
-            l_star = ((1 - params.lambda)*(1 - ab)) / (params.lambda*(1 - params.alpha) + ((1 - params.lambda)*(1 - ab)))
-            
-            # Value function: V(k, z) = B + C*log(k) + D*log(z)
-            C = params.lambda * params.alpha / (1 - ab)
-            D = params.lambda / ((1 - ab) * (1 - params.rho * beta))
-            
-            const_term = params.lambda * (log(1 - ab) + log(A) + (1 - params.alpha) * log(1 - l_star)) + (1 - params.lambda) * log(l_star) + params.beta * C * (log(ab) + log(A) + (1-params.alpha) * log(1 - l_star))
-            B = const_term / (1 - beta)
-
-            # Policy function (consant fraction of production)
-            policy(k, logz) = ab & exp(logz) * params.A * k^params.alpha * (1 - l_star)^(1 - params.alpha)
-
-            return B, C, D, l_star, policy
-        end
-
         # Tests
         # Test 1: Parameter construction
 	    @testset "Parameter construction and validation" begin
@@ -268,7 +271,7 @@
                         basis = basis_builder()
                         
                         # Build DP
-                        cdp = ContinuousDP(f, g, params.beta, shocks, weights, x_lb, x_ub, basis)
+                        cdp = ContinuousDP(f, g, params.beta, shocks, weights, s -> 1e-10, s -> 1 - 1e-10, basis)
                         
                         # Analytical targets on interpolation nodes
                         S = cdp.interp.S
@@ -276,7 +279,7 @@
                         k_prime_star_on_S = [policy(row) for row in eachrow(S)]
                         
                         # Solve DP
-                        res = solve(cdp, method, max_iter=500, tol=sqrt(eps()))
+                        res = solve(cdp, method, max_iter=500, tol=sqrt(eps()),print_level=0)
                         results[test_name] = res
                         l_hat = vec(res.X)
 
@@ -288,7 +291,7 @@
                         @test all(isfinite.(res.Vf))
 
                         # Policy (leisure) shold be in bounds
-                        @test all (x_lb .<= res.X .<= x_ub)
+                        @test all(x_lb .<= res.X .<= x_ub)
 
                         # 
                         println("=== $test_name vs Santos(1999) analytical solution benchmark (delta = 1) ===")
