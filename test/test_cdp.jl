@@ -110,6 +110,61 @@
         
         # Model functions
         # Production and Santos (7.4)-style mapping: given leisure l -> (c, k')
+        # Output
+        function build_production(params::Santos1999Params)
+            function y(k, z, l)
+                return z * params.A * k^params.alpha * (1 - l)^(1 - params.alpha)
+            end
+        end
+
+        # Calculate consumption and k prime based on Santos equation (7.4) ("unidimensional maximization")
+        function build_c_from_l(params::Santos1999Params)
+            function c_from_l(k, z, l)
+                return z * params.A * k^params.alpha * (1 - l)^(-params.alpha) * (params.lambda / (1 - params.lambda)) * (1 - params.alpha) * l
+            end
+        end
+
+        function build_kprime_from_l(params::Santos1999Params)
+            y = build_production(params)
+            c_from_l = build_c_from_l(params)
+
+            function kprime_from_l(k, z, l)
+                return y(k, z, l) + (1 - params.delta) * k - c_from_l(k, z, l)
+            end
+        end
+
+        # Reward function
+        function build_reward_function(params::Santos73Params)
+            c_from_l = build_c_from_l(params)
+            kprime_from_l = build_kprime_from_l(params)
+
+            function f(s, l) 
+                k, logz = s
+                z = exp(logz)
+                if !(0 < l < 1)
+                    return -Inf
+                end
+                c = c_from_l(k, z, l)
+                kp = kprime_from_l(k, z, l)
+                if c <= 0 || kp < 0
+                    return -Inf
+                end
+                return params.lambda*log(c) + (1 - params.lambda)*log(l)
+            end
+        end
+
+        # Transition function
+        function build_transition_function(params::Santos73Params)
+            kprime_from_l = build_kprime_from_l(params)
+
+            function g(s, l, e)
+                k, logz = s
+                z = exp(logz)
+                kp = kprime_from_l(k, z, l)
+                logzp = params.rho*logz + e
+                return (kp, logzp)
+            end
+        end
 
         # Shocks and weights (Gauss-Hermite quadrature)
 
