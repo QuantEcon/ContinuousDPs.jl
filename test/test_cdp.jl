@@ -226,6 +226,26 @@
 
         end
 
+        # Test 3: Solutions with multiple methods and interpolations
+        @testset "Solutions: methods x interpolations" begin
+            params = default_params()
+
+            # Grid setup
+
+            # Shock discretization (Gauss-Hermite quadrature)
+
+            # Build functions
+
+            # Method types
+
+            # Interpolation types
+
+            # Test each combination
+            
+        end
+            
+        end
+
 
 
 
