@@ -241,6 +241,10 @@
             f = build_reward_function(params)
             g = build_transition_function(params)
 
+            # Constuct analytical solutions
+            B, C, D, l_star, policy = analytical_solution(params)
+            v_star(k, logz) = B + C * log(k) + D * logz
+
             # Method types
             methods = [VFI, PFI]
             method_names = ["VFI", "PFI"]
@@ -260,12 +264,23 @@
                     test_name = "$method_name + $interp_name"
 
                     @testset "$test_name" begin
+                        # Build interpolation basis
                         basis = basis_builder()
+                        
+                        # Build DP
                         cdp = ContinuousDP(f, g, params.beta, shocks, weights, x_lb, x_ub, basis)
+                        
+                        # Analytical targets on interpolation nodes
+                        S = cdp.interp.S
+                        v_star_on_S = [v_star(row) for row in eachrow(S)]
+                        k_prime_star_on_S = [policy(row) for row in eachrow(S)]
+                        
+                        # Solve DP
                         res = solve(cdp, method, max_iter=500, tol=sqrt(eps()))
                         results[test_name] = res
+                        l_hat = vec(res.X)
 
-                        # Convergence testset
+                        # Convergence tests
                         @test res.converged
                         @test res.iter < 500
 
@@ -275,7 +290,18 @@
                         # Policy (leisure) shold be in bounds
                         @test all (x_lb .<= res.X .<= x_ub)
 
-                        println("  $test_name: converged in $(res.iter) iterations")
+                        # 
+                        println("=== $test_name vs Santos(1999) analytical solution benchmark (delta = 1) ===")
+                        # Iteration number check
+                        println("$test_name: converged in $(res.iter) iterations")
+
+                        # Policy function benchmark check
+                        println("Analytical l* = ", l_star)
+                        println("l_hat range on interpolation nodes: [", minimum(l_hat), ", ", maximum(l_hat), "]" )
+                        println("max |l_hat - l_star| = ", maximum(abs.(l_hat .- l_star)))
+
+                        # Value function benchmark check
+                        println("max |V_hat - V_star| = ", maximum(abs.(res.Vf .- v_star_on_S)))
                     end
                 end
             end
