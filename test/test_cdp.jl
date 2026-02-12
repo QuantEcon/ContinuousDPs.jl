@@ -185,8 +185,8 @@
         end
 
         # Tests
-        # Test 1: Parameter Construction
-	    @testset "Parameter Construction and Validation" begin
+        # Test 1: Parameter construction
+	    @testset "Parameter construction and validation" begin
             @test_nowarn Santos1999Params(0.95, 1/3, 10.0, 0.34, 1.0, 0.90, 0.008)
 
             params = default_params()
