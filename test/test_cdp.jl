@@ -190,7 +190,7 @@
             B = const_term / (1 - beta)
 
             # Policy function (consant fraction of production)
-            policy(k, z) = ab & exp(logz) * params.A * k^params.alpha * (1 - l_star)^(1 - params.alpha)
+            policy(k, logz) = ab & exp(logz) * params.A * k^params.alpha * (1 - l_star)^(1 - params.alpha)
 
             return B, C, D, l_star, policy
         end
