@@ -90,6 +90,17 @@
             delta::Float64
             rho::Float64
             sigma_epsilon::Float64
+
+            function Santos1999params(beta, gamma, A, alpha, delta, rho, sigma_epsilon)
+                @assert 0 < beta < 1 "beta must be in (0,1)"
+                @assert 0 < gamma <= 1 "gamma must be in (0,1]"
+                @assert A > 0 "A must be positive "
+                @assert 0 < alpha < 1 "alpha must be in (0,1)"
+                @assert 0 <= delta <= 1 "delta must be in [0,1]"
+                @assert 0 <= rho < 1 "rho must be in [0, 1)"
+                @assert sigma_epsilon >= 0 "sigma_epsilon must be non-negative"
+                new(beta, gamma, A, alpha, delta, rho, sigma_epsilon)
+            end
         end
         
         """
