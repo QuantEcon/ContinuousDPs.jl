@@ -212,7 +212,7 @@ end
                     k_prime_star_on_S = policy.(k_nodes, logz_nodes)
                     
                     # Solve DP
-                    res = solve(cdp, method, max_iter=500, tol=sqrt(eps()))#, verbose=0)
+                    res = solve(cdp, method, max_iter=500, tol=sqrt(eps()), verbose=0)
                     results[test_name] = res
                     l_hat = vec(res.X)
 
