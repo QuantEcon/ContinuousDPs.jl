@@ -164,7 +164,7 @@
 
         # Analytical solution (delta = 1)
         function analytical_solution(params::Santos73Params)
-            @assert params.delta ≈ 1.0 "Analytical solution is only for delta = 1"
+            @assert params.delta == 1.0 "Analytical solution is only for delta = 1"
 
             ab = params.alpha * params.beta
 
