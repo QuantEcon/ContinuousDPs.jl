@@ -264,6 +264,75 @@ end
 
     # Test 4: Replicate Santos (1999) Sec. 7.3 Tables 16, 17, 20
     @testset "Santos (1999) Tables 16/17/20 benchmark settings (Linear/Spline)" begin
+        # Mesh size
+        # Exclude (500, 33) due to high computational cost
+        mesh_settings = [(43, 3), (143, 9)]
 
+        # Benchmark table settings (Table 16/17/20)
+        table_settings = [
+            (name="Table 16", params=Santos1999Params(0.95, 1/3, 10.0, 0.34, 1.0, 0.90, 0.008),interp=:linear, meshes=mesh_settings),
+            (name="Table 17", params=Santos1999Params(0.99, 1/3, 10.0, 0.34, 1.0, 0.90, 0.008),interp=:linear, meshes=mesh_settings),
+            (name="Table 20", params=Santos1999Params(0.95, 1/3, 10.0, 0.34, 1.0, 0.90, 0.008),interp=:spline, meshes=mesh_settings),
+        ]
+
+        function build_basis(interp_type::Symbol, nk::Int, nlogz::Int)
+            if interp_type == :linear
+                return Basis(LinParams(nk, k_min, k_max), LinParams(nlogz, logz_min, logz_max))
+
+            elseif interp_type == :spline
+                return Basis(SplineParams(collect(range(k_min, k_max, length=nk)), 0, 3), SplineParams(collect(range(logz_min, logz_max, length=nlogz)), 0, 3))
+            else
+                error("Unknown interp_type == $interp_type")
+            end
+        end
+        
+        for table in table_settings
+            params = table.params
+            @testset "$table.name ($(table.interp))" begin
+                # Shock discretization (Gauss-Hermite quadrature)
+                n_shocks = 7
+                shocks, weights = qnwnorm(n_shocks, 0.0, params.sigma_epsilon^2)
+
+                # Build functions
+                f = build_reward_function(params)
+                g = build_transition_function(params)
+
+                # Constuct analytical solutions
+                B, C, D, l_star, policy, v_star = analytical_solution(params)
+
+                for (nk, nlogz) in table.meshes
+                    @testset "mesh: $(nk) x $(nlogz)" begin
+                        # Build interpolation basis
+                        basis = build_basis(table.interp, nk, nlogz)
+
+                        # Build DP
+                        cdp = ContinuousDP(f, g, params.beta, shocks, weights, x_lb, x_ub, basis)
+                        
+                        # Analytical targets on interpolation nodes
+                        S = cdp.interp.S
+                        k_nodes = @view S[:, 1]
+                        logz_nodes = @view S[:, 2]
+                        v_star_on_S = v_star.(k_nodes, logz_nodes)
+                        k_prime_star_on_S = policy.(k_nodes, logz_nodes)
+                        
+                        # Solve DP
+                        res = solve(cdp, PFI, max_iter=500, tol=sqrt(eps()), verbose=0)
+                        l_hat = vec(res.X)
+
+                        # Convergence tests
+                        @test res.converged
+                        @test res.num_iter < 500
+
+                        # Value function finite test
+                        @test all(isfinite.(res.V))
+
+                        # Policy (leisure) shold be in bounds
+                        lb = x_lb(S[1, :])
+                        ub = x_ub(S[1, :])
+                        @test all((lb .<= res.X) .& (res.X .<= ub))
+                    end
+                end
+            end
+        end
     end
 end
