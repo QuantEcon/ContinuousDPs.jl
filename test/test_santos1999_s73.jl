@@ -287,6 +287,7 @@ end
         end
         
         for table in table_settings
+            println("=== Santos(1999) $(table.name) solution benchmark ===")
             params = table.params
             @testset "$table.name ($(table.interp))" begin
                 # Shock discretization (Gauss-Hermite quadrature)
@@ -330,6 +331,17 @@ end
                         lb = x_lb(S[1, :])
                         ub = x_ub(S[1, :])
                         @test all((lb .<= res.X) .& (res.X .<= ub))
+
+                        # Iteration number check
+                        println("$(table.name) (mesh: $(nk) x $(nlogz)): converged in $(res.num_iter) iterations")
+
+                        # Policy function benchmark check
+                        println("Analytical l* = ", l_star)
+                        println("l_hat range on interpolation nodes: [", minimum(l_hat), ", ", maximum(l_hat), "]" )
+                        println("max |l_hat - l_star| = ", maximum(abs.(l_hat .- l_star)))
+
+                        # Value function benchmark check
+                        println("max |V_hat - V_star| = ", maximum(abs.(res.V .- v_star_on_S)))
                     end
                 end
             end
