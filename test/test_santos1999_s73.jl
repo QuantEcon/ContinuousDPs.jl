@@ -28,12 +28,30 @@ Default parameters from Santos (1999) Section 7.3, Table 16
 """
 default_params() = Santos1999Params(0.95, 1/3, 10.0, 0.34, 1.0, 0.90, 0.008)
 
+# Mesh size (as in Santos, 1999, Sec. 7.3)
+# Exclude (500, 33) due to high computational cost
+mesh_settings = ((43, 3), (143, 9))
+
 # State domains (as in Santos, 1999, Sec. 7.3)
 logz_min, logz_max = -0.32, 0.32
 k_min, k_max = 0.10, 10.0
 
 # For numerical stability
 x_lb(s), x_ub(s) = 1e-10, 1 - 1e-10
+
+# For interpolation settings
+struct InterpType
+    type::Symbol
+    label::String
+    deg_k::Int
+    deg_z::Int
+end
+
+interp_types = [
+    InterpType(:linear, "Linear", 0, 0),
+    InterpType(:spline, "Spline", 3, 1),
+    InterpType(:chebyshev, "Chebyshev", 0, 0)
+]
 
 # Model functions
 # Production and Santos (7.4)-style mapping: given leisure l -> (c, k')
@@ -128,6 +146,35 @@ function analytical_solution(params::Santos1999Params)
     return B, C, D, l_star, policy, v_star
 end
 
+# Build interpolation basis
+function build_basis(interp_type::Symbol, nk::Int, nlogz::Int;
+                     kmin::Float64=k_min, kmax::Float64=k_max,
+                     zmin::Float64=logz_min, zmax::Float64=logz_max,
+                     deg_k::Int=3, deg_z::Int=1)
+    if interp_type == :linear
+        return Basis(LinParams(nk, kmin, kmax), LinParams(nlogz, zmin, zmax))
+
+    elseif interp_type == :chebyshev
+        return Basis(ChebParams(nk, kmin, kmax), ChebParams(nlogz, zmin, zmax))
+
+    elseif interp_type == :spline
+        dk = min(deg_k, nk - 1)
+        dz = min(deg_z, nlogz - 1)
+
+        @assert nk >= 2 "nk must be >= 2"
+        @assert nlogz >= 2 "nlogz must be >= 2"
+        @assert dk >= 1 && dz >= 1
+
+        breaks_k = nk - (dk - 1)
+        breaks_z = nlogz - (dz - 1)
+
+        return Basis(SplineParams(breaks_k, kmin, kmax, dk), SplineParams(breaks_z, zmin, zmax, dz))
+    
+    else
+        error("Unknown interp_type == $interp_type")
+    end
+end
+
 
 @testset "Santos (1999) Sec. 7.3: stochastic growth w/ leisure (2D state, 1D control) benchmarks" begin
     # Tests
@@ -183,23 +230,16 @@ end
         methods = [VFI, PFI]
         method_names = ["VFI", "PFI"]
 
-        # Interpolation types
-        interp_types = [
-            ("Linear", () -> Basis(LinParams(nk, k_min, k_max), LinParams(nlogz, logz_min, logz_max))),
-            ("Spline", () -> Basis(SplineParams(collect(range(k_min, k_max, length=nk)), 0, 3), SplineParams(collect(range(logz_min, logz_max, length=nlogz)), 0, 3))),
-            ("Chebyshev", () -> Basis(ChebParams(nk, k_min, k_max), ChebParams(nlogz, logz_min, logz_max)))
-        ]
-
         # Test each combination
         results = Dict()
 
         for (method, method_name) in zip(methods, method_names)
-            for (interp_name, basis_builder) in interp_types
-                test_name = "$method_name + $interp_name"
+            for interp_type in interp_types
+                test_name = "$method_name + $(interp_type.label)"
 
                 @testset "$test_name" begin
                     # Build interpolation basis
-                    basis = basis_builder()
+                    basis = build_basis(interp_type.type, nk, nlogz)
                     
                     # Build DP
                     cdp = ContinuousDP(f, g, params.beta, shocks, weights, x_lb, x_ub, basis)
@@ -264,32 +304,17 @@ end
 
     # Test 4: Replicate Santos (1999) Sec. 7.3 Tables 16, 17, 20
     @testset "Santos (1999) Tables 16/17/20 benchmark settings (Linear/Spline)" begin
-        # Mesh size
-        # Exclude (500, 33) due to high computational cost
-        mesh_settings = [(43, 3), (143, 9)]
-
         # Benchmark table settings (Table 16/17/20)
         table_settings = [
-            (name="Table 16", params=Santos1999Params(0.95, 1/3, 10.0, 0.34, 1.0, 0.90, 0.008),interp=:linear, meshes=mesh_settings),
-            (name="Table 17", params=Santos1999Params(0.99, 1/3, 10.0, 0.34, 1.0, 0.90, 0.008),interp=:linear, meshes=mesh_settings),
-            (name="Table 20", params=Santos1999Params(0.95, 1/3, 10.0, 0.34, 1.0, 0.90, 0.008),interp=:spline, meshes=mesh_settings),
+            (name="Table 16", params=Santos1999Params(0.95, 1/3, 10.0, 0.34, 1.0, 0.90, 0.008), deg_k=0, deg_z=0, interp=:linear, meshes=mesh_settings),
+            (name="Table 17", params=Santos1999Params(0.99, 1/3, 10.0, 0.34, 1.0, 0.90, 0.008), deg_k=0, deg_z=0, interp=:linear, meshes=mesh_settings),
+            (name="Table 20", params=Santos1999Params(0.95, 1/3, 10.0, 0.34, 1.0, 0.90, 0.008), deg_k=3, deg_z=1, interp=:spline, meshes=mesh_settings),
         ]
-
-        function build_basis(interp_type::Symbol, nk::Int, nlogz::Int)
-            if interp_type == :linear
-                return Basis(LinParams(nk, k_min, k_max), LinParams(nlogz, logz_min, logz_max))
-
-            elseif interp_type == :spline
-                return Basis(SplineParams(collect(range(k_min, k_max, length=nk)), 0, 3), SplineParams(collect(range(logz_min, logz_max, length=nlogz)), 0, 3))
-            else
-                error("Unknown interp_type == $interp_type")
-            end
-        end
         
         for table in table_settings
             println("=== Santos(1999) $(table.name) solution benchmark ===")
             params = table.params
-            @testset "$table.name ($(table.interp))" begin
+            @testset "$(table.name) ($(table.interp))" begin
                 # Shock discretization (Gauss-Hermite quadrature)
                 n_shocks = 7
                 shocks, weights = qnwnorm(n_shocks, 0.0, params.sigma_epsilon^2)
@@ -302,9 +327,9 @@ end
                 B, C, D, l_star, policy, v_star = analytical_solution(params)
 
                 for (nk, nlogz) in table.meshes
-                    @testset "mesh: $(nk) x $(nlogz)" begin
+                    @testset "$(table.name): $(nk) x $(nlogz)" begin
                         # Build interpolation basis
-                        basis = build_basis(table.interp, nk, nlogz)
+                        basis = build_basis(table.interp, nk, nlogz; deg_k=table.deg_k, deg_z=table.deg_z)
 
                         # Build DP
                         cdp = ContinuousDP(f, g, params.beta, shocks, weights, x_lb, x_ub, basis)
