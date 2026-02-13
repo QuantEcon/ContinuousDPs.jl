@@ -261,4 +261,9 @@ end
             end
         end
     end
+
+    # Test 4: Replicate Santos (1999) Sec. 7.3 Tables 16, 17, 20
+    @testset "Santos (1999) Tables 16/17/20 benchmark settings (Linear/Spline)" begin
+
+    end
 end
