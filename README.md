@@ -18,3 +18,4 @@ add https://github.com/QuantEcon/ContinuousDPs.jl
 
 * [Stochastic optimal growth model](http://nbviewer.jupyter.org/github/QuantEcon/ContinuousDPs.jl/blob/main/examples/cdp_ex_optgrowth_jl.ipynb)
 * [Examples from Miranda and Fackler 2002, Chapter 9](http://nbviewer.jupyter.org/github/QuantEcon/ContinuousDPs.jl/blob/main/examples/cdp_ex_MF_jl.ipynb)
+* [Santos (1999) Section 7.3 multidimensional-state stochastic growth model (with analytical benchmark)](http://nbviewer.jupyter.org/github/QuantEcon/ContinuousDPs.jl/blob/main/examples/cdp_ex_santos1999_s73_jl.ipynb)
