@@ -113,6 +113,11 @@ v_star(k, logz) = B + C * log(k) + D * logz
 
             # Value function benchmark check
             @test maximum(abs, res.V .- v_star_on_S) <= value_tol
+
+            # set_eval_nodes! 
+            k_grid = collect(range(k_min, k_max, length=15))
+            logz_grid = collect(range(logz_min, logz_max, length=7))
+            @test_nowarn set_eval_nodes!(res, k_grid, logz_grid)
         end
     end
 end
