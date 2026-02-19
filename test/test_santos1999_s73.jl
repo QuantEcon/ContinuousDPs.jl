@@ -50,7 +50,7 @@ function g(s, l, e)
     z = exp(logz)
     kp = kprime_from_l(k, z, l)
     logzp = rho * logz + e
-    return (kp, logzp)
+    return Float64[kp, logzp]
 end
 
 # Analytical solution (delta = 1)
@@ -118,6 +118,21 @@ v_star(k, logz) = B + C * log(k) + D * logz
             k_grid = collect(range(k_min, k_max, length=15))
             logz_grid = collect(range(logz_min, logz_max, length=7))
             @test_nowarn set_eval_nodes!(res, k_grid, logz_grid)
+
+            # simulate
+            s_init = [0.1, 0.0]
+            ts_length = 50
+            #Random.seed!(1234)
+            s_path = simulate(res, s_init, ts_length)
+            k_path = @view s_path[1, :]
+            logz_path = @view s_path[2, :]
+
+            # Check if k stays within bounds
+            @test all(k_path .>= k_min) && all(k_path .<= k_max)
+
+            # Check if logz stays within bounds
+            @test all(logz_path .>= logz_min) && all(logz_path .<= logz_max)
+
         end
     end
 end
