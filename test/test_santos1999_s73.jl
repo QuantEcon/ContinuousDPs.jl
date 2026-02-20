@@ -48,7 +48,7 @@ function g(s, x, e)
     z = exp(logz)
     kp = kprime_from_x(k, z, x)
     logzp = rho * logz + e
-    return Float64[kp, logzp]
+    return (kp, logzp)
 end
 
 # Analytical solution (delta = 1)

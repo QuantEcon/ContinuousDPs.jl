@@ -719,12 +719,12 @@ function simulate!(rng::AbstractRNG, s_path::TS,
 
     s_ind_front = Base.front(axes(s_path))
     e_ind_tail = Base.tail(axes(res.cdp.shocks))
-    s_path[(s_ind_front..., 1)...] = s_init
+    view(s_path, (s_ind_front..., 1)... ) .= s_init
     for t in 1:ts_length - 1
         s = s_path[(s_ind_front..., t)...]
         x = X_interp(s)
         e = res.cdp.shocks[(e_ind[t], e_ind_tail...)...]
-        s_path[(s_ind_front..., t + 1)...] = res.cdp.g(s, x, e)
+        view(s_path, (s_ind_front..., t + 1)... ) .= res.cdp.g(s, x, e)
     end
 
     return s_path
