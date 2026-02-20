@@ -22,33 +22,33 @@ function mesh_size_h(mesh_setting)
 end
 
 # Model functions
-# Production and Santos (7.4)-style mapping: given leisure l -> (c, k')
+# Production and Santos (7.4)-style mapping: given leisure x -> (c, k')
 # Production function
-y(k, z, l) = z * A * k^alpha * (1 - l)^(1 - alpha)
+y(k, z, x) = z * A * k^alpha * (1 - x)^(1 - alpha)
 # Consumption and k prime based on Santos equation (7.4) ("unidimensional maximization")
-c_from_l(k, z, l) = z * A * k^alpha * (1 - l)^(-alpha) * (lambda / (1 - lambda)) * (1 - alpha) * l
-kprime_from_l(k, z, l) = y(k, z, l) + (1 - delta) * k - c_from_l(k, z, l)
+c_from_x(k, z, x) = z * A * k^alpha * (1 - x)^(-alpha) * (lambda / (1 - lambda)) * (1 - alpha) * x
+kprime_from_x(k, z, x) = y(k, z, x) + (1 - delta) * k - c_from_x(k, z, x)
 
 # Reward function
-function f(s, l)
+function f(s, x)
     k, logz = s
     z = exp(logz)
-    if !(0 < l < 1)
+    if !(0 < x < 1)
         return -Inf
     end
-    c = c_from_l(k, z, l)
-    kp = kprime_from_l(k, z, l)
+    c = c_from_x(k, z, x)
+    kp = kprime_from_x(k, z, x)
     if c <= 0 || kp < 0
         return -Inf
     end
-    return lambda * log(c) + (1 - lambda) * log(l)
+    return lambda * log(c) + (1 - lambda) * log(x)
 end
 
 # Transition function
-function g(s, l, e)
+function g(s, x, e)
     k, logz = s
     z = exp(logz)
-    kp = kprime_from_l(k, z, l)
+    kp = kprime_from_x(k, z, x)
     logzp = rho * logz + e
     return Float64[kp, logzp]
 end
@@ -56,15 +56,15 @@ end
 # Analytical solution (delta = 1)
 ab = alpha * beta
 # Optimal leisure (constant)
-l_star = ((1 - lambda) * (1 - ab)) / (lambda * (1 - alpha) + ((1 - lambda) * (1 - ab)))
+x_star = ((1 - lambda) * (1 - ab)) / (lambda * (1 - alpha) + ((1 - lambda) * (1 - ab)))
 
 # Policy function (consant fraction of production)
-policy(k, logz) = ab * exp(logz) * A * k^alpha * (1 - l_star)^(1 - alpha)
+policy(k, logz) = ab * exp(logz) * A * k^alpha * (1 - x_star)^(1 - alpha)
 
 # Value function: V(k, z) = B + C*log(k) + D*log(z)
 C = lambda * alpha / (1 - ab)
 D = lambda / ((1 - ab) * (1 - rho * beta))
-const_term = lambda * (log(1 - ab) + log(A) + (1 - alpha) * log(1 - l_star)) + (1 - lambda) * log(l_star) + beta * C * (log(ab) + log(A) + (1 - alpha) * log(1 - l_star))
+const_term = lambda * (log(1 - ab) + log(A) + (1 - alpha) * log(1 - x_star)) + (1 - lambda) * log(x_star) + beta * C * (log(ab) + log(A) + (1 - alpha) * log(1 - x_star))
 B = const_term / (1 - beta)
 v_star(k, logz) = B + C * log(k) + D * logz
 
@@ -102,8 +102,8 @@ v_star(k, logz) = B + C * log(k) + D * logz
 
             # Solve DP
             res = solve(cdp, method, max_iter=500, tol=sqrt(eps()), verbose=0)
-            l_hat = vec(res.X)
-            k_hat = kprime_from_l.(k_nodes, exp.(logz_nodes), l_hat)
+            x_hat = vec(res.X)
+            k_hat = kprime_from_x.(k_nodes, exp.(logz_nodes), x_hat)
 
             # Convergence tests
             @test res.converged
