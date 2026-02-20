@@ -12,14 +12,12 @@ k_min, k_max = 0.10, 10.0
 x_lb(s), x_ub(s) = 1e-10, 1 - 1e-10
 
 # Mesh size (as in Santos, 1999, Sec. 7.3)
-# Exclude (500, 33) due to high computational cost
-mesh_settings = ((43, 3), (143, 9))
-function mesh_size_h(mesh_setting)
-    nk, nlogz = mesh_setting
-    grid_size_k = (k_max - k_min) / (nk - 1)
-    grid_size_logz = (logz_max - logz_min) / (nlogz - 1)
-    return sqrt(grid_size_k^2 + grid_size_logz^2)
-end
+# Exclude (143, 9) and (500, 33) due to high computational cost
+mesh_setting = (43, 3)
+nk, nlogz = mesh_setting
+grid_size_k = (k_max - k_min) / (nk - 1)
+grid_size_logz = (logz_max - logz_min) / (nlogz - 1)
+mesh_size_h = sqrt(grid_size_k^2 + grid_size_logz^2)
 
 # Model functions
 # Production and Santos (7.4)-style mapping: given leisure x -> (c, k')
@@ -78,61 +76,57 @@ v_star(k, logz) = B + C * log(k) + D * logz
     methods = [VFI, PFI]
 
     for method in methods
-        for mesh_setting in mesh_settings
-            # Calculate mesh size for tolerance settings
-            h = mesh_size_h(mesh_setting)
+        # Calculate mesh size for tolerance settings
+        # Tolerances based on Santos (1999) Table 16: observed constants are approximately 0.36
+        policy_tol = 0.4 * mesh_size_h
+        # Tol based on Santos (1999) Table 16: measured upper bounds are approximately 24
+        value_tol = 24 * mesh_size_h^2
 
-            # Tolerances based on Santos (1999) Table 16: observed constants are approximately 0.36
-            policy_tol = 0.4 * h
-            # Tol based on Santos (1999) Table 16: measured upper bounds are approximately 24
-            value_tol = 24 * h^2
+        # Build basis
+        basis = Basis(LinParams(nk, k_min, k_max), LinParams(nlogz, logz_min, logz_max))
 
-            # Build basis
-            basis = Basis(LinParams(mesh_setting[1], k_min, k_max), LinParams(mesh_setting[2], logz_min, logz_max))
+        # Build DP
+        cdp = ContinuousDP(f, g, beta, shocks, weights, x_lb, x_ub, basis)
 
-            # Build DP
-            cdp = ContinuousDP(f, g, beta, shocks, weights, x_lb, x_ub, basis)
+        # Analytical targets on interpolation nodes
+        S = cdp.interp.S
+        k_nodes = @view S[:, 1]
+        logz_nodes = @view S[:, 2]
+        v_star_on_S = v_star.(k_nodes, logz_nodes)
+        k_prime_star_on_S = policy.(k_nodes, logz_nodes)
 
-            # Analytical targets on interpolation nodes
-            S = cdp.interp.S
-            k_nodes = @view S[:, 1]
-            logz_nodes = @view S[:, 2]
-            v_star_on_S = v_star.(k_nodes, logz_nodes)
-            k_prime_star_on_S = policy.(k_nodes, logz_nodes)
+        # Solve DP
+        res = solve(cdp, method, max_iter=500, tol=sqrt(eps()), verbose=0)
+        x_hat = vec(res.X)
+        k_hat = kprime_from_x.(k_nodes, exp.(logz_nodes), x_hat)
 
-            # Solve DP
-            res = solve(cdp, method, max_iter=500, tol=sqrt(eps()), verbose=0)
-            x_hat = vec(res.X)
-            k_hat = kprime_from_x.(k_nodes, exp.(logz_nodes), x_hat)
+        # Convergence tests
+        @test res.converged
 
-            # Convergence tests
-            @test res.converged
+        # Policy function benchmark check
+        @test maximum(abs, k_hat .- k_prime_star_on_S) <= policy_tol
 
-            # Policy function benchmark check
-            @test maximum(abs, k_hat .- k_prime_star_on_S) <= policy_tol
+        # Value function benchmark check
+        @test maximum(abs, res.V .- v_star_on_S) <= value_tol
 
-            # Value function benchmark check
-            @test maximum(abs, res.V .- v_star_on_S) <= value_tol
+        # set_eval_nodes! 
+        k_grid = collect(range(k_min, k_max, length=15))
+        logz_grid = collect(range(logz_min, logz_max, length=7))
+        @test_nowarn set_eval_nodes!(res, k_grid, logz_grid)
 
-            # set_eval_nodes! 
-            k_grid = collect(range(k_min, k_max, length=15))
-            logz_grid = collect(range(logz_min, logz_max, length=7))
-            @test_nowarn set_eval_nodes!(res, k_grid, logz_grid)
+        # simulate
+        s_init = [0.1, 0.0]
+        ts_length = 50
+        #Random.seed!(1234)
+        s_path = simulate(res, s_init, ts_length)
+        k_path = @view s_path[1, :]
+        logz_path = @view s_path[2, :]
 
-            # simulate
-            s_init = [0.1, 0.0]
-            ts_length = 50
-            #Random.seed!(1234)
-            s_path = simulate(res, s_init, ts_length)
-            k_path = @view s_path[1, :]
-            logz_path = @view s_path[2, :]
+        # Check if k stays within bounds
+        @test all(k_path .>= k_min) && all(k_path .<= k_max)
 
-            # Check if k stays within bounds
-            @test all(k_path .>= k_min) && all(k_path .<= k_max)
+        # Check if logz stays within bounds
+        @test all(logz_path .>= logz_min) && all(logz_path .<= logz_max)
 
-            # Check if logz stays within bounds
-            @test all(logz_path .>= logz_min) && all(logz_path .<= logz_max)
-
-        end
     end
 end
