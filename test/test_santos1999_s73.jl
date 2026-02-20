@@ -68,7 +68,7 @@ const_term = lambda * (log(1 - ab) + log(A) + (1 - alpha) * log(1 - l_star)) + (
 B = const_term / (1 - beta)
 v_star(k, logz) = B + C * log(k) + D * logz
 
-@testset "Santos (1999) Sec. 7.3: stochastic growth w/ leisure (2D state, 1D control) benchmarks" begin
+@testset "Multidimensional-state stochastic optimal growth" begin
     # Test: Linear basis with VFI and PFI should match analytical solution on interpolation nodes within tolerances based on Santos (1999) Sec. 7.3
     # Shock discretization (Gauss-Hermite quadrature)
     n_shocks = 7
