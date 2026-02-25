@@ -9,7 +9,8 @@ logz_min, logz_max = -0.32, 0.32
 k_min, k_max = 0.10, 10.0
 
 # For numerical stability
-x_lb(s), x_ub(s) = 1e-10, 1 - 1e-10
+x_lb(s) = 1e-10
+x_ub(s) = 1 - 1e-10
 
 # Mesh size (as in Santos, 1999, Sec. 7.3)
 # Exclude (143, 9) and (500, 33) due to high computational cost
