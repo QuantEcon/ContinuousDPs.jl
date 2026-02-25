@@ -57,7 +57,7 @@ ab = alpha * beta
 # Optimal leisure (constant)
 x_star = ((1 - lambda) * (1 - ab)) / (lambda * (1 - alpha) + ((1 - lambda) * (1 - ab)))
 
-# Policy function (consant fraction of production)
+# Policy function (constant fraction of production)
 policy(k, logz) = ab * exp(logz) * A * k^alpha * (1 - x_star)^(1 - alpha)
 
 # Value function: V(k, z) = B + C*log(k) + D*log(z)
