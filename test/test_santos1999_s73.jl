@@ -1,8 +1,13 @@
 # ==================================================
 # Santos (1999) Section 7.3 Tests
 # ==================================================
+using Random
+
 # Model parameters (as in Santos, 1999, Sec. 7.3)
 beta, lambda, A, alpha, delta, rho, sigma_epsilon = 0.95, 1 / 3, 10.0, 0.34, 1.0, 0.90, 0.008
+
+# Random seed for reproducibility
+seed = 1234
 
 # State domains (as in Santos, 1999, Sec. 7.3)
 logz_min, logz_max = -0.32, 0.32
@@ -118,8 +123,8 @@ v_star(k, logz) = B + C * log(k) + D * logz
         # simulate
         s_init = [0.1, 0.0]
         ts_length = 50
-        #Random.seed!(1234)
-        s_path = simulate(res, s_init, ts_length)
+        rng = MersenneTwister(seed)
+        s_path = simulate(rng, res, s_init, ts_length)
         k_path = @view s_path[1, :]
         logz_path = @view s_path[2, :]
 
