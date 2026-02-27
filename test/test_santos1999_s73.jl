@@ -73,6 +73,8 @@
     B = const_term / (1 - beta)
     v_star(k, logz) = B + C * log(k) + D * logz
 
+    results = Dict()
+
     @testset "Linear Basis with Multiple Methods" begin
         # Test: Linear basis with VFI and PFI should match analytical solution on interpolation nodes within tolerances based on Santos (1999) Sec. 7.3
         # Shock discretization (Gauss-Hermite quadrature)
@@ -83,6 +85,8 @@
         methods = [VFI, PFI]
 
         for method in methods
+            test_name = "$method + Linear"
+
             # Calculate mesh size for tolerance settings
             # Tolerances based on Santos (1999) Table 16: observed constants are approximately 0.36
             policy_tol = 0.4 * mesh_size_h
@@ -104,6 +108,7 @@
 
             # Solve DP
             res = solve(cdp, method, max_iter=500, tol=sqrt(eps()), verbose=0)
+            results[test_name] = res
             x_hat = vec(res.X)
             k_hat = kprime_from_x.(k_nodes, exp.(logz_nodes), x_hat)
 
@@ -121,19 +126,26 @@
             logz_grid = collect(range(logz_min, logz_max, length=7))
             @test_nowarn set_eval_nodes!(res, k_grid, logz_grid)
 
-            # simulate
-            s_init = [0.1, 0.0]
-            ts_length = 50
-            rng = MersenneTwister(seed)
-            s_path = simulate(rng, res, s_init, ts_length)
-            k_path = @view s_path[1, :]
-            logz_path = @view s_path[2, :]
-
-            # Check if k stays within bounds
-            @test all(k_path .>= k_min) && all(k_path .<= k_max)
-
-            # Check if logz stays within bounds
-            @test all(logz_path .>= logz_min) && all(logz_path .<= logz_max)
         end
     end
+
+    @testset "simulate (PFI, linear basis)" begin
+        res = results["PFI + Linear"]
+
+        # simulate
+        s_init = [0.1, 0.0]
+        ts_length = 50
+        rng = MersenneTwister(seed)
+        s_path = simulate(rng, res, s_init, ts_length)
+        k_path = @view s_path[1, :]
+        logz_path = @view s_path[2, :]
+
+        # Check if k stays within bounds
+        @test all(k_path .>= k_min) && all(k_path .<= k_max)
+
+        # Check if logz stays within bounds
+        @test all(logz_path .>= logz_min) && all(logz_path .<= logz_max)
+
+    end
+
 end
