@@ -134,6 +134,6 @@
 
             # Check if logz stays within bounds
             @test all(logz_path .>= logz_min) && all(logz_path .<= logz_max)
-
+        end
     end
 end
