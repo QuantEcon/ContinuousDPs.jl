@@ -228,7 +228,6 @@
             value_tol = 2.61 * 10
             
             # Build basis
-            nk_cheb, nlogz_cheb = 43, 3
             basis = Basis(ChebParams(nk, k_min, k_max), 
                           ChebParams(nlogz, logz_min, logz_max))
 
