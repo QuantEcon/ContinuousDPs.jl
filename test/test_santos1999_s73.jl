@@ -209,6 +209,62 @@
         end
     end
 
+    @testset "Chebyshev Basis with Multiple Methods" begin
+        # Test: Verify that ContinuousDP solves correctly with Chebyshev basis
+        # Not a Santos (1999) benchmark
+        # Shock discretization (Gauss-Hermite quadrature)
+        n_shocks = 7
+        shocks, weights = qnwnorm(n_shocks, 0.0, sigma_epsilon^2)
+
+        # Method types
+        methods = [VFI, PFI]
+
+        for method in methods
+            test_name = "$method + Chebyshev"
+
+            # Tolerances based on Santos (1999) Table 16
+            # Safety factor 10 for Chebyshev with nlogz=3
+            policy_tol = 1.12e-1 * 10
+            value_tol = 2.61 * 10
+            
+            # Build basis
+            nk_cheb, nlogz_cheb = 43, 3
+            basis = Basis(ChebParams(nk, k_min, k_max), 
+                          ChebParams(nlogz, logz_min, logz_max))
+
+            # Build DP
+            cdp = ContinuousDP(f, g, beta, shocks, weights, x_lb, x_ub, basis)
+
+            # Analytical targets on interpolation nodes
+            S = cdp.interp.S
+            k_nodes = @view S[:, 1]
+            logz_nodes = @view S[:, 2]
+            v_star_on_S = v_star.(k_nodes, logz_nodes)
+            k_prime_star_on_S = policy.(k_nodes, logz_nodes)
+
+            # Solve DP
+            res = solve(cdp, method, max_iter=500, tol=sqrt(eps()), verbose=0)
+            results[test_name] = res
+            x_hat = vec(res.X)
+            k_hat = first.(g.(eachrow(S), x_hat, 0.0))
+
+            # Convergence tests
+            @test res.converged
+
+            # Policy function benchmark check
+            @test maximum(abs, k_hat .- k_prime_star_on_S) <= policy_tol
+
+            # Value function benchmark check
+            @test maximum(abs, res.V .- v_star_on_S) <= value_tol
+
+            # set_eval_nodes! 
+            k_grid = collect(range(k_min, k_max, length=15))
+            logz_grid = collect(range(logz_min, logz_max, length=7))
+            @test_nowarn set_eval_nodes!(res, k_grid, logz_grid)
+
+        end
+    end
+
     @testset "simulate (PFI, linear basis)" begin
         res = results["PFI + Linear"]
 
