@@ -162,7 +162,7 @@
             # Tolerances based on Santos (1999) Table 20
             policy_tol = 1.92e-2
 
-            # Tol based on Santos (1999) Table 16
+            # Tol based on Santos (1999) Table 20
             value_tol = 9.58e-1
 
             # Build basis
