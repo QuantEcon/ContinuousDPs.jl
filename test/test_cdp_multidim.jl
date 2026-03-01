@@ -88,179 +88,80 @@
 
     results = Dict()
 
-    @testset "Linear Basis with Multiple Methods" begin
-        # Test: Linear basis with VFI and PFI based on Santos (1999) Sec. 7.3
-        # Shock discretization (Gauss-Hermite quadrature)
-        n_shocks = 7
-        shocks, weights = qnwnorm(n_shocks, 0.0, sigma_epsilon^2)
+    # Shock discretization (Gauss-Hermite quadrature)
+    n_shocks = 7
+    shocks, weights = qnwnorm(n_shocks, 0.0, sigma_epsilon^2)
 
-        # Method types
-        methods = [VFI, PFI]
+    # Basis configurations: (label, basis, policy_tol, value_tol)
+    deg_k, deg_z = 2, 3
+    dk = min(deg_k, nk - 1)
+    dz = min(deg_z, nlogz - 1)
+    breaks_k = nk - (dk - 1)
+    breaks_z = nlogz - (dz - 1)
 
-        for method in methods
-            test_name = "$method + Linear"
-
-            # Calculate mesh size for tolerance settings
-            # Tolerances based on Santos (1999) Table 16
-            # Observed constants are approximately 0.36
-            policy_tol = 0.4 * mesh_size_h
-
-            # Tol based on Santos (1999) Table 16
-            # Measured upper bounds are approximately 24
-            value_tol = 24 * mesh_size_h^2
-
-            # Build basis
-            basis = Basis(LinParams(nk, k_min, k_max), 
-                          LinParams(nlogz, logz_min, logz_max))
-
-            # Build DP
-            cdp = ContinuousDP(f, g, beta, shocks, weights, x_lb, x_ub, basis)
-
-            # Analytical targets on interpolation nodes
-            S = cdp.interp.S
-            k_nodes = @view S[:, 1]
-            logz_nodes = @view S[:, 2]
-            v_star_on_S = v_star.(k_nodes, logz_nodes)
-            k_prime_star_on_S = policy.(k_nodes, logz_nodes)
-
-            # Solve DP
-            res = @inferred solve(cdp, method, max_iter=500, tol=sqrt(eps()), verbose=0)
-            results[test_name] = res
-            x_hat = vec(res.X)
-            k_hat = first.(g.(eachrow(S), x_hat, 0.0))
-
-            # Convergence tests
-            @test res.converged
-
-            # Policy function benchmark check
-            @test maximum(abs, k_hat .- k_prime_star_on_S) <= policy_tol
-
-            # Value function benchmark check
-            @test maximum(abs, res.V .- v_star_on_S) <= value_tol
-
-            # set_eval_nodes! 
-            k_grid = collect(range(k_min, k_max, length=15))
-            logz_grid = collect(range(logz_min, logz_max, length=7))
-            @test_nowarn set_eval_nodes!(res, k_grid, logz_grid)
-
-        end
-    end
-
-    @testset "Spline Basis with Multiple Methods" begin
-        # Test: Spline basis with VFI and PFI based on Santos (1999) Sec. 7.3
-        # Shock discretization (Gauss-Hermite quadrature)
-        n_shocks = 7
-        shocks, weights = qnwnorm(n_shocks, 0.0, sigma_epsilon^2)
-
-        # Method types
-        methods = [VFI, PFI]
-
-        for method in methods
-            test_name = "$method + Spline"
-
-            # Calculate mesh size for tolerance settings
-            # Tolerances based on Santos (1999) Table 20
-            policy_tol = 1.92e-2
-
-            # Tol based on Santos (1999) Table 20
-            value_tol = 9.58e-1
-
-            # Build basis
-            # Spline degree: cubic over k, linear over logz
-            # Santos (1999) footnote 17: shape-preserving spline over k, cubic spline over z
-            deg_k, deg_z = 2, 3
-            dk = min(deg_k, nk - 1)
-            dz = min(deg_z, nlogz - 1)
-            breaks_k = nk - (dk - 1)
-            breaks_z = nlogz - (dz - 1)
-            basis = Basis(SplineParams(breaks_k, k_min, k_max, dk), 
-                          SplineParams(breaks_z, logz_min, logz_max, dz))
-
-            # Build DP
-            cdp = ContinuousDP(f, g, beta, shocks, weights, x_lb, x_ub, basis)
-
-            # Analytical targets on interpolation nodes
-            S = cdp.interp.S
-            k_nodes = @view S[:, 1]
-            logz_nodes = @view S[:, 2]
-            v_star_on_S = v_star.(k_nodes, logz_nodes)
-            k_prime_star_on_S = policy.(k_nodes, logz_nodes)
-
-            # Solve DP
-            res = @inferred solve(cdp, method, max_iter=500, tol=sqrt(eps()), verbose=0)
-            results[test_name] = res
-            x_hat = vec(res.X)
-            k_hat = first.(g.(eachrow(S), x_hat, 0.0))
-
-            # Convergence tests
-            @test res.converged
-
-            # Policy function benchmark check
-            @test maximum(abs, k_hat .- k_prime_star_on_S) <= policy_tol
-
-            # Value function benchmark check
-            @test maximum(abs, res.V .- v_star_on_S) <= value_tol
-
-            # set_eval_nodes! 
-            k_grid = collect(range(k_min, k_max, length=15))
-            logz_grid = collect(range(logz_min, logz_max, length=7))
-            @test_nowarn set_eval_nodes!(res, k_grid, logz_grid)
-
-        end
-    end
-
-    @testset "Chebyshev Basis with Multiple Methods" begin
-        # Test: Verify that ContinuousDP solves correctly with Chebyshev basis
+    basis_configs = [
+    (
+        "Linear",
+        Basis(LinParams(nk, k_min, k_max),
+              LinParams(nlogz, logz_min, logz_max)),
+        0.4 * mesh_size_h,       # policy_tol: Santos (1999) Table 16
+        24 * mesh_size_h^2,      # value_tol:  Santos (1999) Table 16
+    ),
+    (
+        "Spline",
+        # Spline degree: quadratic over k, linear over logz
+        # Santos (1999) footnote 17: shape-preserving spline over k,
+        # cubic spline over z
+        Basis(SplineParams(breaks_k, k_min, k_max, dk),
+              SplineParams(breaks_z, logz_min, logz_max, dz)),
+        1.92e-2,   # policy_tol: Santos (1999) Table 20
+        9.58e-1,   # value_tol:  Santos (1999) Table 20
+    ),
+    (
+        "Chebyshev",
         # Not a Santos (1999) benchmark
-        # Shock discretization (Gauss-Hermite quadrature)
-        n_shocks = 7
-        shocks, weights = qnwnorm(n_shocks, 0.0, sigma_epsilon^2)
+        Basis(ChebParams(nk, k_min, k_max),
+              ChebParams(nlogz, logz_min, logz_max)),
+        1.12e-1 * 10,  # policy_tol: Table 16 with safety factor 10
+        2.61 * 10,     # value_tol:  Table 16 with safety factor 10
+    ),
+    ] 
 
-        # Method types
-        methods = [VFI, PFI]
+    for (basis_label, basis, policy_tol, value_tol) in basis_configs
+        @testset "$basis_label Basis with Multiple Methods" begin
+            for method in [VFI, PFI]
+                test_name = "$method + $basis_label"
 
-        for method in methods
-            test_name = "$method + Chebyshev"
+                # Build DP
+                cdp = ContinuousDP(f, g, beta, shocks, weights, x_lb, x_ub, basis)
 
-            # Tolerances based on Santos (1999) Table 16
-            # Safety factor 10 for Chebyshev with nlogz=3
-            policy_tol = 1.12e-1 * 10
-            value_tol = 2.61 * 10
-            
-            # Build basis
-            basis = Basis(ChebParams(nk, k_min, k_max), 
-                          ChebParams(nlogz, logz_min, logz_max))
+                # Analytical targets on interpolation nodes
+                S = cdp.interp.S
+                k_nodes = @view S[:, 1]
+                logz_nodes = @view S[:, 2]
+                v_star_on_S = v_star.(k_nodes, logz_nodes)
+                k_prime_star_on_S = policy.(k_nodes, logz_nodes)
 
-            # Build DP
-            cdp = ContinuousDP(f, g, beta, shocks, weights, x_lb, x_ub, basis)
+                # Solve DP
+                res = @inferred solve(cdp, method, max_iter=500, tol=sqrt(eps()), verbose=0)
+                results[test_name] = res
+                x_hat = vec(res.X)
+                k_hat = first.(g.(eachrow(S), x_hat, 0.0))
 
-            # Analytical targets on interpolation nodes
-            S = cdp.interp.S
-            k_nodes = @view S[:, 1]
-            logz_nodes = @view S[:, 2]
-            v_star_on_S = v_star.(k_nodes, logz_nodes)
-            k_prime_star_on_S = policy.(k_nodes, logz_nodes)
+                # Convergence tests
+                @test res.converged
 
-            # Solve DP
-            res = @inferred solve(cdp, method, max_iter=500, tol=sqrt(eps()), verbose=0)
-            results[test_name] = res
-            x_hat = vec(res.X)
-            k_hat = first.(g.(eachrow(S), x_hat, 0.0))
+                # Policy function benchmark check
+                @test maximum(abs, k_hat .- k_prime_star_on_S) <= policy_tol
 
-            # Convergence tests
-            @test res.converged
+                # Value function benchmark check
+                @test maximum(abs, res.V .- v_star_on_S) <= value_tol
 
-            # Policy function benchmark check
-            @test maximum(abs, k_hat .- k_prime_star_on_S) <= policy_tol
-
-            # Value function benchmark check
-            @test maximum(abs, res.V .- v_star_on_S) <= value_tol
-
-            # set_eval_nodes! 
-            k_grid = collect(range(k_min, k_max, length=15))
-            logz_grid = collect(range(logz_min, logz_max, length=7))
-            @test_nowarn set_eval_nodes!(res, k_grid, logz_grid)
-
+                # set_eval_nodes! 
+                k_grid = collect(range(k_min, k_max, length=15))
+                logz_grid = collect(range(logz_min, logz_max, length=7))
+                @test_nowarn set_eval_nodes!(res, k_grid, logz_grid)
+            end
         end
     end
 
