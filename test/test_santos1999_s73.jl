@@ -3,9 +3,14 @@
     # Santos (1999) Section 7.3 Tests
     # ==================================================
     
-
     # Model parameters (as in Santos, 1999, Sec. 7.3)
-    beta, lambda, A, alpha, delta, rho, sigma_epsilon = 0.95, 1 / 3, 10.0, 0.34, 1.0, 0.90, 0.008
+    beta = 0.95
+    lambda = 1 / 3
+    A = 10.0
+    alpha = 0.34
+    delta = 1.0
+    rho = 0.90
+    sigma_epsilon = 0.008
 
     # Random seed for reproducibility
     seed = 1234
@@ -30,8 +35,12 @@
     # Production and Santos (7.4)-style mapping: given leisure x -> (c, k')
     # Production function
     y(k, z, x) = z * A * k^alpha * (1 - x)^(1 - alpha)
-    # Consumption and k prime based on Santos equation (7.4) ("unidimensional maximization")
-    c_from_x(k, z, x) = z * A * k^alpha * (1 - x)^(-alpha) * (lambda / (1 - lambda)) * (1 - alpha) * x
+    # Consumption and k prime based on Santos equation (7.4)
+    function c_from_x(k, z, x) 
+        term1 = z * A * k^alpha * (1 - x)^(-alpha)
+        term2 = (lambda / (1 - lambda)) * (1 - alpha) * x
+        return term1 * term2
+    end
     kprime_from_x(k, z, x) = y(k, z, x) + (1 - delta) * k - c_from_x(k, z, x)
 
     # Reward function
@@ -61,7 +70,9 @@
     # Analytical solution (delta = 1)
     ab = alpha * beta
     # Optimal leisure (constant)
-    x_star = ((1 - lambda) * (1 - ab)) / (lambda * (1 - alpha) + ((1 - lambda) * (1 - ab)))
+    x_star_numerator = (1 - lambda) * (1 - ab)
+    x_star_denominator = lambda * (1 - alpha) + ((1 - lambda) * (1 - ab))
+    x_star = x_star_numerator / x_star_denominator
 
     # Policy function (constant fraction of production)
     policy(k, logz) = ab * exp(logz) * A * k^alpha * (1 - x_star)^(1 - alpha)
@@ -69,14 +80,16 @@
     # Value function: V(k, z) = B + C*log(k) + D*log(z)
     C = lambda * alpha / (1 - ab)
     D = lambda / ((1 - ab) * (1 - rho * beta))
-    const_term = lambda * (log(1 - ab) + log(A) + (1 - alpha) * log(1 - x_star)) + (1 - lambda) * log(x_star) + beta * C * (log(ab) + log(A) + (1 - alpha) * log(1 - x_star))
-    B = const_term / (1 - beta)
+    const_term1 = lambda * (log(1 - ab) + log(A) + (1 - alpha) * log(1 - x_star))
+    const_term2 = (1 - lambda) * log(x_star) 
+    const_term3 = beta * C * (log(ab) + log(A) + (1 - alpha) * log(1 - x_star))
+    B = (const_term1 + const_term2 + const_term3) / (1 - beta)
     v_star(k, logz) = B + C * log(k) + D * logz
 
     results = Dict()
 
     @testset "Linear Basis with Multiple Methods" begin
-        # Test: Linear basis with VFI and PFI should match analytical solution on interpolation nodes within tolerances based on Santos (1999) Sec. 7.3
+        # Test: Linear basis with VFI and PFI based on Santos (1999) Sec. 7.3
         # Shock discretization (Gauss-Hermite quadrature)
         n_shocks = 7
         shocks, weights = qnwnorm(n_shocks, 0.0, sigma_epsilon^2)
@@ -88,13 +101,17 @@
             test_name = "$method + Linear"
 
             # Calculate mesh size for tolerance settings
-            # Tolerances based on Santos (1999) Table 16: observed constants are approximately 0.36
+            # Tolerances based on Santos (1999) Table 16
+            # Observed constants are approximately 0.36
             policy_tol = 0.4 * mesh_size_h
-            # Tol based on Santos (1999) Table 16: measured upper bounds are approximately 24
+
+            # Tol based on Santos (1999) Table 16
+            # Measured upper bounds are approximately 24
             value_tol = 24 * mesh_size_h^2
 
             # Build basis
-            basis = Basis(LinParams(nk, k_min, k_max), LinParams(nlogz, logz_min, logz_max))
+            basis = Basis(LinParams(nk, k_min, k_max), 
+                          LinParams(nlogz, logz_min, logz_max))
 
             # Build DP
             cdp = ContinuousDP(f, g, beta, shocks, weights, x_lb, x_ub, basis)
