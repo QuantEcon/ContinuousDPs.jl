@@ -127,7 +127,7 @@
             res = solve(cdp, method, max_iter=500, tol=sqrt(eps()), verbose=0)
             results[test_name] = res
             x_hat = vec(res.X)
-            k_hat = kprime_from_x.(k_nodes, exp.(logz_nodes), x_hat)
+            k_hat = first.(g.(eachrow(S), x_hat, 0.0))
 
             # Convergence tests
             @test res.converged
