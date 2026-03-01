@@ -124,7 +124,7 @@
             k_prime_star_on_S = policy.(k_nodes, logz_nodes)
 
             # Solve DP
-            res = solve(cdp, method, max_iter=500, tol=sqrt(eps()), verbose=0)
+            res = @inferred solve(cdp, method, max_iter=500, tol=sqrt(eps()), verbose=0)
             results[test_name] = res
             x_hat = vec(res.X)
             k_hat = first.(g.(eachrow(S), x_hat, 0.0))
@@ -187,7 +187,7 @@
             k_prime_star_on_S = policy.(k_nodes, logz_nodes)
 
             # Solve DP
-            res = solve(cdp, method, max_iter=500, tol=sqrt(eps()), verbose=0)
+            res = @inferred solve(cdp, method, max_iter=500, tol=sqrt(eps()), verbose=0)
             results[test_name] = res
             x_hat = vec(res.X)
             k_hat = first.(g.(eachrow(S), x_hat, 0.0))
@@ -242,7 +242,7 @@
             k_prime_star_on_S = policy.(k_nodes, logz_nodes)
 
             # Solve DP
-            res = solve(cdp, method, max_iter=500, tol=sqrt(eps()), verbose=0)
+            res = @inferred solve(cdp, method, max_iter=500, tol=sqrt(eps()), verbose=0)
             results[test_name] = res
             x_hat = vec(res.X)
             k_hat = first.(g.(eachrow(S), x_hat, 0.0))
@@ -271,7 +271,7 @@
         s_init = [0.1, 0.0]
         ts_length = 50
         rng = MersenneTwister(seed)
-        s_path = simulate(rng, res, s_init, ts_length)
+        s_path = @inferred simulate(rng, res, s_init, ts_length)
         k_path = @view s_path[1, :]
         logz_path = @view s_path[2, :]
 
