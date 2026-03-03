@@ -64,8 +64,10 @@
 
                 # simulate
                 s_path = @inferred(simulate(res, s_init, ts_length))
-                atol = 1e-5
-                @test isapprox(s_path[end], s_path_star[end]; atol=atol)
+                atol = 1e-4
+                @test s_path[1] == s_init
+                @test length(s_path) == ts_length 
+                @test maximum(abs, s_path - s_path_star) <= atol
             end
         end
 
