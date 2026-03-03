@@ -43,31 +43,34 @@
         push!(bases, Basis(SplineParams(breaks, s_min, s_max, k)))
 
         methods = [PFI, VFI]
+        basis_labels = ["Chebyshev", "Spline"]
 
-        for basis in bases
+        for (basis, label) in zip(bases, basis_labels)
             cdp = ContinuousDP(f, g, beta, shocks, weights, x_lb, x_ub, basis)
 
             for method in methods
-                # solve
-                tol = sqrt(eps())
-                max_iter = 500
-                res = @inferred(solve(cdp, method, tol=tol, max_iter=max_iter))
+                @testset "Test $method with $label basis" begin
+                    # solve
+                    tol = sqrt(eps())
+                    max_iter = 500
+                    res = @inferred(solve(cdp, method, tol=tol, max_iter=max_iter))
 
-                rtol = 1e-5
-                @test isapprox(res.V, v_star.(cdp.interp.S); rtol=rtol)
-                @test isapprox(res.X, x_star.(cdp.interp.S); rtol=rtol)
+                    rtol = 1e-5
+                    @test isapprox(res.V, v_star.(cdp.interp.S); rtol=rtol)
+                    @test isapprox(res.X, x_star.(cdp.interp.S); rtol=rtol)
 
-                # set_eval_nodes!
-                grid_size = 200
-                eval_nodes = collect(range(s_min, stop=s_max, length=grid_size))
-                set_eval_nodes!(res, eval_nodes);
+                    # set_eval_nodes!
+                    grid_size = 200
+                    eval_nodes = collect(range(s_min, stop=s_max, length=grid_size))
+                    set_eval_nodes!(res, eval_nodes);
 
-                # simulate
-                s_path = @inferred(simulate(res, s_init, ts_length))
-                atol = 1e-4
-                @test s_path[1] == s_init
-                @test length(s_path) == ts_length 
-                @test maximum(abs, s_path - s_path_star) <= atol
+                    # simulate
+                    s_path = @inferred(simulate(res, s_init, ts_length))
+                    atol = 1e-4
+                    @test s_path[1] == s_init
+                    @test length(s_path) == ts_length 
+                    @test maximum(abs, s_path - s_path_star) <= atol
+                end
             end
         end
 
