@@ -136,18 +136,16 @@
         alpha = 0.2
         bet = 0.5
         gamm = 0.9
-        sigma = 0.1
         discount = 0.9;
 
         x_star = ((discount * bet) / (1 - discount * gamm))^(1 / (1 - bet))
         s_star = gamm * x_star + x_star^bet
-        s_star, x_star
 
         f(s, x) = (s - x)^(1 - alpha) / (1 - alpha)
         g(s, x, e) = gamm * x .+ e * x^bet;
 
         n_shocks = 3
-        shocks, weights = zeros(3), ones(3) / 3.
+        shocks, weights = zeros(n_shocks), ones(n_shocks) / n_shocks
 
         x_lb(s) = 0
         x_ub(s) = 0.99 * s;
