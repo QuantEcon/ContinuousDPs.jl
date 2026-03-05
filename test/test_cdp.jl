@@ -68,7 +68,7 @@
                     s_path = @inferred(simulate(res, s_init, ts_length))
                     atol = 1e-4
                     @test s_path[1] == s_init
-                    @test length(s_path) == ts_length 
+                    @test length(s_path) == ts_length
                     @test maximum(abs, s_path - s_path_star) <= atol
                 end
             end
@@ -142,9 +142,6 @@
         bet = 0.5
         gamm = 0.9
         discount = 0.9;
-
-        x_star = ((discount * bet) / (1 - discount * gamm))^(1 / (1 - bet))
-        s_star = gamm * x_star + x_star^bet
 
         f(s, x) = (s - x)^(1 - alpha) / (1 - alpha)
         g(s, x, e) = gamm * x .+ e * x^bet;
