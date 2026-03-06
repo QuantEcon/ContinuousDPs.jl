@@ -86,7 +86,7 @@
     end
 
     @testset "LQ control" begin
-        using QuantEcon
+        import QuantEcon
 
         A = [1.0 0.0;
              -0.5 0.9];
