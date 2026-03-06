@@ -43,29 +43,34 @@
         push!(bases, Basis(SplineParams(breaks, s_min, s_max, k)))
 
         methods = [PFI, VFI]
+        basis_labels = ["Chebyshev", "Spline"]
 
-        for basis in bases
+        for (basis, label) in zip(bases, basis_labels)
             cdp = ContinuousDP(f, g, beta, shocks, weights, x_lb, x_ub, basis)
 
             for method in methods
-                # solve
-                tol = sqrt(eps())
-                max_iter = 500
-                res = @inferred(solve(cdp, method, tol=tol, max_iter=max_iter))
+                @testset "Test $method with $label basis" begin
+                    # solve
+                    tol = sqrt(eps())
+                    max_iter = 500
+                    res = @inferred(solve(cdp, method, tol=tol, max_iter=max_iter))
 
-                rtol = 1e-5
-                @test isapprox(res.V, v_star.(cdp.interp.S); rtol=rtol)
-                @test isapprox(res.X, x_star.(cdp.interp.S); rtol=rtol)
+                    rtol = 1e-5
+                    @test isapprox(res.V, v_star.(cdp.interp.S); rtol=rtol)
+                    @test isapprox(res.X, x_star.(cdp.interp.S); rtol=rtol)
 
-                # set_eval_nodes!
-                grid_size = 200
-                eval_nodes = collect(range(s_min, stop=s_max, length=grid_size))
-                set_eval_nodes!(res, eval_nodes);
+                    # set_eval_nodes!
+                    grid_size = 200
+                    eval_nodes = collect(range(s_min, stop=s_max, length=grid_size))
+                    set_eval_nodes!(res, eval_nodes);
 
-                # simulate
-                s_path = @inferred(simulate(res, s_init, ts_length))
-                atol = 1e-5
-                @test isapprox(s_path[end], s_path_star[end]; atol=atol)
+                    # simulate
+                    s_path = @inferred(simulate(res, s_init, ts_length))
+                    atol = 1e-4
+                    @test s_path[1] == s_init
+                    @test length(s_path) == ts_length
+                    @test maximum(abs, s_path - s_path_star) <= atol
+                end
             end
         end
 
@@ -81,7 +86,7 @@
     end
 
     @testset "LQ control" begin
-        using QuantEcon
+        import QuantEcon
 
         A = [1.0 0.0;
              -0.5 0.9];
@@ -138,18 +143,13 @@
         alpha = 0.2
         bet = 0.5
         gamm = 0.9
-        sigma = 0.1
         discount = 0.9;
-
-        x_star = ((discount * bet) / (1 - discount * gamm))^(1 / (1 - bet))
-        s_star = gamm * x_star + x_star^bet
-        s_star, x_star
 
         f(s, x) = (s - x)^(1 - alpha) / (1 - alpha)
         g(s, x, e) = gamm * x .+ e * x^bet;
 
         n_shocks = 3
-        shocks, weights = zeros(3), ones(3) / 3.
+        shocks, weights = zeros(n_shocks), ones(n_shocks) / n_shocks
 
         x_lb(s) = 0
         x_ub(s) = 0.99 * s;
