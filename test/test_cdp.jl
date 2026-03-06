@@ -86,6 +86,8 @@
     end
 
     @testset "LQ control" begin
+        using QuantEcon
+
         A = [1.0 0.0;
              -0.5 0.9];
 
@@ -107,7 +109,7 @@
         point = (5.0, 0.0, 0.0);
 
         discount = 0.9;
-        lq = LQ(Q, R, A, B, C, N, bet=discount);
+        lq = QuantEcon.LQ(Q, R, A, B, C, N, bet=discount);
         P, F, d = stationary_values(lq);
         v_star(s) = -([1, s...]' * P * [1, s...] + d)
         x_star(s) = -(F * [1, s...])[1];
