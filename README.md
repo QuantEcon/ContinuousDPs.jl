@@ -16,5 +16,6 @@ add https://github.com/QuantEcon/ContinuousDPs.jl
 
 ## Demo Notebooks
 
-* [Stochastic optimal growth model](http://nbviewer.jupyter.org/github/QuantEcon/ContinuousDPs.jl/blob/main/examples/cdp_ex_optgrowth_jl.ipynb)
+* [Stochastic Optimal Growth Model](http://nbviewer.jupyter.org/github/QuantEcon/ContinuousDPs.jl/blob/main/examples/cdp_ex_optgrowth_jl.ipynb)
 * [Examples from Miranda and Fackler 2002, Chapter 9](http://nbviewer.jupyter.org/github/QuantEcon/ContinuousDPs.jl/blob/main/examples/cdp_ex_MF_jl.ipynb)
+* [LQ Approximation with `QuantEcon.jl` and `ContinuousDPs`](http://nbviewer.jupyter.org/github/QuantEcon/ContinuousDPs.jl/blob/main/examples/lqapprox_jl.ipynb)
