@@ -129,11 +129,13 @@
 
     for (basis_label, basis, policy_tol, value_tol) in basis_configs
         @testset "$basis_label Basis with Multiple Methods" begin
+
+            # Build DP
+            cdp = ContinuousDP(f, g, beta, shocks, weights, x_lb, x_ub, basis)
+            @test ndims(cdp) == 2
+
             for method in [VFI, PFI]
                 test_name = "$method + $basis_label"
-
-                # Build DP
-                cdp = ContinuousDP(f, g, beta, shocks, weights, x_lb, x_ub, basis)
 
                 # Analytical targets on interpolation nodes
                 S = cdp.interp.S
@@ -144,6 +146,8 @@
 
                 # Solve DP
                 res = @inferred solve(cdp, method, max_iter=500, tol=sqrt(eps()), verbose=0)
+                @test ndims(res) == 2
+
                 results[test_name] = res
                 x_hat = vec(res.X)
                 k_hat = first.(g.(eachrow(S), x_hat, 0.0))
@@ -162,6 +166,19 @@
                 logz_grid = collect(range(logz_min, logz_max, length=7))
                 @test_nowarn set_eval_nodes!(res, k_grid, logz_grid)
             end
+
+            res = solve(cdp, verbose=0)
+
+            # Test set_eval_nodes! for NTuple{N,AbstractVector}
+            k_grid = range(k_min, k_max, length=15)
+            logz_grid = range(logz_min, logz_max, length=7)
+            @test_nowarn set_eval_nodes!(res, k_grid, logz_grid)
+
+            # Test callable interface
+            V, X, resid = res(res.eval_nodes)
+            @test V == res.V
+            @test X == res.X
+            @test resid == res.resid
         end
     end
 
@@ -182,6 +199,13 @@
         # Check if logz stays within bounds
         @test all(logz_path .>= logz_min) && all(logz_path .<= logz_max)
 
+        # Test simulate methods without `rng`
+        s_path0 = Array{Float64}(undef, 2, ts_length)
+        s_path1 = @inferred ContinuousDPs.simulate!(s_path0, res, s_init)
+        @test s_path1 == s_path0
+
+        s_path2 = @inferred simulate(res, s_init, ts_length)
+        @test size(s_path2) == (2, ts_length)
     end
 
 end
