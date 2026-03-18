@@ -130,7 +130,7 @@ function ContinuousDP(cdp::ContinuousDP;
     weights = cdp.weights,
     x_lb = cdp.x_lb,
     x_ub = cdp.x_ub,
-    basis = cdp.interp.basis,
+    basis = cdp.interp.basis
 )
     return ContinuousDP(f, g, discount, shocks, weights, x_lb, x_ub, basis)
 end
