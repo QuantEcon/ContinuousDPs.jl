@@ -19,13 +19,13 @@ import QuantEcon.ScalarOrArray
 #= Types and contructors =#
 
 """
-    Interp{N,TS,TM,TL}
+    Interp{N,TB,TS,TM,TL}
 
 Type that contains information about interpolation
 
 # Fields
 
-- `basis::Basis{N}`: Object that contains interpolation basis information
+- `basis::TB<:Basis{N}`: Object that contains interpolation basis information
 - `S::TS<:VecOrMat`: Vector or Matrix that contains interpolation nodes
 - `Scoord::NTuple{N,Vector{Float64}}` Tuple that contains transformed
   interpolation nodes
@@ -37,8 +37,8 @@ Type that contains information about interpolation
 - `Phi::TM<:AbstractMatrix`: Interpolation basis matrix
 - `Phi_lu::TL<:Factorization`: LU factorized interpolation basis matrix
 """
-struct Interp{N,TS<:VecOrMat,TM<:AbstractMatrix,TL<:Factorization}
-    basis::Basis{N}
+struct Interp{N,TB<:Basis{N},TS<:VecOrMat,TM<:AbstractMatrix,TL<:Factorization}
+    basis::TB
     S::TS
     Scoord::NTuple{N,Vector{Float64}}
     length::Int
@@ -58,7 +58,7 @@ Constructor for `Interp`
 
 -`basis::Basis`: Object that contains interpolation basis information
 """
-function Interp(basis::Basis)
+function Interp(basis::Basis{N}) where {N}
     S, Scoord = nodes(basis)
     grid_length = length(basis)
     grid_size = size(basis)
@@ -71,25 +71,23 @@ end
 
 
 """
-    ContinuousDP{N,TR,TS,Tf,Tg,Tlb,Tub}
+    ContinuousDP{N,Tf,Tg,TR,Tlb,Tub,TI}
 
 Type that reperesents a continuous-state dynamic program
 
 # Fields
 
-- `f::Tf<:Function`: Reward function
-- `g::Tg<:Function`: State transition function
+- `f::Tf`: Reward function
+- `g::Tg`: State transition function
 - `discount::Float64`: Discount factor
 - `shocks::TR<:AbstractVecOrMat`: Random variables' nodes
 - `weights::Vector{Float64}`: Random variables' weights
-- `x_lb::Tlb<:Function`: Lower bound of action variables
-- `x_ub::Tub<:Function`: Upper bound of action variables
-- `interp::Interp{N,TS<:VecOrMat}`: Object that contains information about
+- `x_lb::Tlb`: Lower bound of action variables
+- `x_ub::Tub`: Upper bound of action variables
+- `interp::TI<:Interp{N}`: Object that contains information about
   interpolation
 """
-mutable struct ContinuousDP{N,TR<:AbstractVecOrMat,TS<:VecOrMat,
-                            Tf<:Function,Tg<:Function,
-                            Tlb<:Function,Tub<:Function}
+struct ContinuousDP{N,Tf,Tg,TR<:AbstractVecOrMat,Tlb,Tub,TI<:Interp{N}}
     f::Tf
     g::Tg
     discount::Float64
@@ -97,7 +95,7 @@ mutable struct ContinuousDP{N,TR<:AbstractVecOrMat,TS<:VecOrMat,
     weights::Vector{Float64}
     x_lb::Tlb
     x_ub::Tub
-    interp::Interp{N,TS}
+    interp::TI
 end
 
 """
@@ -106,62 +104,75 @@ end
 Constructor for `ContinuousDP`
 
 # Arguments
-- `f::Tf<:Function`: Reward function
-- `g::Tg<:Function`: State transition function
-- `discount::Float64`: Discount factor
-- `shocks::TR<:AbstractVecOrMat`: Random variables' nodes
+- `f`: Reward function
+- `g`: State transition function
+- `discount::Real`: Discount factor
+- `shocks::AbstractVecOrMat`: Random variables' nodes
 - `weights::Vector{Float64}`: Random variables' weights
-- `x_lb::Tlb<:Function`: Lower bound of action variables
-- `x_ub::Tub<:Function`: Upper bound of action variables
+- `x_lb`: Lower bound of action variables
+- `x_ub`: Upper bound of action variables
 - `basis::Basis`: Object that contains interpolation basis information
 """
-function ContinuousDP(f::Function, g::Function, discount::Float64,
-                      shocks::Array{Float64}, weights::Vector{Float64},
-                      x_lb::Function, x_ub::Function,
-                      basis::Basis)
+function ContinuousDP(f, g, discount::Real,
+                      shocks::AbstractVecOrMat, weights::Vector{Float64},
+                      x_lb, x_ub,
+                      basis::Basis{N}) where {N}
     interp = Interp(basis)
-    cdp = ContinuousDP(f, g, discount, shocks, weights, x_lb, x_ub, interp)
+    cdp = ContinuousDP(f, g, Float64(discount), shocks, weights, x_lb, x_ub, interp)
     return cdp
+end
+
+function ContinuousDP(cdp::ContinuousDP;
+    f = cdp.f,
+    g = cdp.g,
+    discount = cdp.discount,
+    shocks = cdp.shocks,
+    weights = cdp.weights,
+    x_lb = cdp.x_lb,
+    x_ub = cdp.x_ub,
+    basis = cdp.interp.basis,
+)
+    return ContinuousDP(f, g, discount, shocks, weights, x_lb, x_ub, basis)
 end
 
 
 """
-    CDPSolveResult{Algo,N,TR,TS}
+    CDPSolveResult{Algo,N,TCDP,TE}
 
 Type that contains the solution result of continuous-state dynamic programming
 
 # Fields
 
-- `cdp::ContinuousDP{N,TR,TS}`: Object that contains model paramers
+- `cdp::TCDP<:ContinuousDP{N}`: Object that contains model paramers
 - `tol::Float64`: Convergence criteria
 - `max_iter::Int`: Maximum number of iteration
 - `C::Vector{Float64}`: Basis coefficients vector
 - `converged::Bool`: Bool that shows whether model converges
 - `num_iter::Int`: Number of iteration until model converges
-- `eval_nodes::TS<:VecOrMat`: Evaluation vector or matrix
+- `eval_nodes::TE<:VecOrMat`: Evaluation vector or matrix
 - `eval_nodes_coord::NTuple{N,Vector{Float64}}`: Tuple that contains evaluation
   transformed grids
 - `V::Vector{Float64}`: Computed value function
 - `X::Vector{Float64}`: Computed policy function
 - `resid::Vector{Float64}`: Residuals of basis coefficients
 """
-mutable struct CDPSolveResult{Algo<:DPAlgorithm,N,
-                              TR<:AbstractVecOrMat,TS<:VecOrMat}
-    cdp::ContinuousDP{N,TR,TS}
+mutable struct CDPSolveResult{Algo<:DPAlgorithm,N,TCDP<:ContinuousDP{N},
+                              TE<:VecOrMat}
+    cdp::TCDP
     tol::Float64
     max_iter::Int
     C::Vector{Float64}
     converged::Bool
     num_iter::Int
-    eval_nodes::TS
+    eval_nodes::TE
     eval_nodes_coord::NTuple{N,Vector{Float64}}
     V::Vector{Float64}
     X::Vector{Float64}
     resid::Vector{Float64}
 
-    function CDPSolveResult{Algo,N,TR,TS}(
-            cdp::ContinuousDP{N,TR,TS}, tol::Float64, max_iter::Integer
-        ) where {Algo,N,TR,TS}
+    function CDPSolveResult{Algo,N}(
+            cdp::TCDP, tol::Float64, max_iter::Integer
+        ) where {Algo,N,TCDP<:ContinuousDP{N}}
         C = zeros(cdp.interp.length)
         converged = false
         num_iter = 0
@@ -170,8 +181,10 @@ mutable struct CDPSolveResult{Algo<:DPAlgorithm,N,
         V = Float64[]
         X = Float64[]
         resid = Float64[]
-        res = new{Algo,N,TR,TS}(cdp, tol, max_iter, C, converged, num_iter,
-                                eval_nodes, eval_nodes_coord, V, X, resid)
+        res = new{Algo,N,TCDP,typeof(eval_nodes)}(
+            cdp, tol, max_iter, C, converged, num_iter,
+            eval_nodes, eval_nodes_coord, V, X, resid
+        )
         return res
     end
 end
@@ -574,18 +587,18 @@ Solve the continuous-state dynamic program
 
 # Returns
 
-- `res::CDPSolveResult{Algo,N,TR,TS}`: Object to store the result of dynamic
+- `res::CDPSolveResult`: Object to store the result of dynamic
   programming
 """
 
-function solve(cdp::ContinuousDP{N,TR,TS}, method::Type{Algo}=PFI;
+function solve(cdp::ContinuousDP{N}, method::Type{Algo}=PFI;
                v_init::Vector{Float64}=zeros(cdp.interp.length),
                tol::Real=sqrt(eps()), max_iter::Integer=500,
                verbose::Int=2,
                print_skip::Int=50,
-               kwargs...) where {Algo<:DPAlgorithm,N,TR,TS}
+               kwargs...) where {Algo<:DPAlgorithm,N}
     tol = Float64(tol)
-    res = CDPSolveResult{Algo,N,TR,TS}(cdp, tol, max_iter)
+    res = CDPSolveResult{Algo,N}(cdp, tol, max_iter)
     ldiv!(res.C, cdp.interp.Phi_lu, v_init)
     _solve!(cdp, res, verbose, print_skip; kwargs...)
     evaluate!(res)
@@ -703,9 +716,9 @@ Generate a sample path of state variable(s)
 
 - `s_path::VecOrMat`:: Generated sample path of state variable(s)
 """
-function simulate!(rng::AbstractRNG, s_path::TS,
-                   res::CDPSolveResult{Algo,N,TR,TS},
-                   s_init) where {Algo,N,TR,TS<:VecOrMat}
+function simulate!(rng::AbstractRNG, s_path::VecOrMat,
+                   res::CDPSolveResult{Algo,N},
+                   s_init) where {Algo,N}
     ts_length = size(s_path)[end]
     cdf = cumsum(res.cdp.weights)
     r = rand(rng, ts_length - 1)

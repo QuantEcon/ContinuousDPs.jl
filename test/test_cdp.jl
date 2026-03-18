@@ -83,6 +83,23 @@
                            solve(cdp, max_iter=max_iter)
            end
         end
+
+        @testset "Test type inference" begin
+            interp_fact(cdp) = cdp.interp.Phi_lu
+            transition_fun(res) = res.cdp.g
+            interp_basis(cdp) = cdp.interp.basis
+
+            cdp = ContinuousDP(
+                f, g, beta, shocks, weights, x_lb, x_ub, bases[1]
+            )
+
+            @inferred interp_fact(cdp)
+
+            res = @inferred solve(cdp)
+
+            @inferred transition_fun(res)
+            @inferred interp_basis(cdp)
+        end
     end
 
     @testset "LQ control" begin
