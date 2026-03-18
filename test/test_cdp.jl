@@ -74,6 +74,28 @@
             end
         end
 
+        @testset "Test ContinuousDP copy constructor" begin
+            cdp1 = ContinuousDP(
+                f, g, beta, shocks, weights, x_lb, x_ub, bases[1]
+            )
+
+            cdp2 = @inferred ContinuousDP(cdp1)
+            @test ndims(cdp2) == ndims(cdp1)
+            @test cdp2.discount == cdp1.discount
+            @test cdp2.shocks == cdp1.shocks
+            @test cdp2.weights == cdp1.weights
+            @test cdp2.interp.length == cdp1.interp.length
+            @test cdp2.interp.S == cdp1.interp.S
+
+            beta2 = 0.98
+            cdp3 = @inferred ContinuousDP(cdp1; discount=beta2, basis=bases[2])
+            @test cdp3.discount == beta2
+            @test ndims(cdp3) == ndims(cdp1)
+            @test cdp3.shocks == cdp1.shocks
+            @test cdp3.weights == cdp1.weights
+            @test cdp3.interp.length == length(bases[2])
+        end
+
         @testset "Test warning" begin
             cdp = ContinuousDP(
                 f, g, beta, shocks, weights, x_lb, x_ub, bases[1]
@@ -82,6 +104,23 @@
                 @test_logs (:warn, r".*max_iter.*")
                            solve(cdp, max_iter=max_iter)
            end
+        end
+
+        @testset "Test type inference" begin
+            interp_fact(cdp) = cdp.interp.Phi_lu
+            transition_fun(res) = res.cdp.g
+            interp_basis(cdp) = cdp.interp.basis
+
+            cdp = ContinuousDP(
+                f, g, beta, shocks, weights, x_lb, x_ub, bases[1]
+            )
+
+            @inferred interp_fact(cdp)
+
+            res = @inferred solve(cdp)
+
+            @inferred transition_fun(res)
+            @inferred interp_basis(cdp)
         end
     end
 
