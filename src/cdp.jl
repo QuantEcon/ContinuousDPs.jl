@@ -263,26 +263,28 @@ end
 #= Methods =#
 
 """
-    _s_wise_max(cdp, s, C)
+    _s_wise_max!(cdp, s, C, sp)
 
-Find optimal value and policy for each grid point
+Find optimal value and policy at a given state `s`
 
 # Arguments
 
 - `cdp::ContinuousDP`: Object that contains model parameters
-- `s::AbstractArray{Float64}`: Interpolation nodes
-- `C::Vector{Float64}`: Basis coefficients vector
+- `s`: State point at which to maximize
+- `C`: Basis coefficients vector
+- `sp::Matrix{Float64}`: Workspace for next-state evaluations
 
 # Returns
 
-- `v::Vector{Float64}`: Updated value function vector
-- `x::Vector{Float64}`: Updated policy function vector
+- `v::Float64`: Optimal value at `s`
+- `x::Float64`: Optimal action at `s`
 """
-function _s_wise_max(cdp::ContinuousDP, s, C)
-    sp = Array{Float64}(undef, size(cdp.shocks, 1), length(s))
+function _s_wise_max!(cdp::ContinuousDP, s, C, sp::Matrix{Float64})
+    shock_tail = Base.tail(axes(cdp.shocks))
+
     function objective(x)
         for i in 1:size(sp, 1)
-            sp[i, :] .= cdp.g(s, x, cdp.shocks[i, axes(cdp.shocks)[2:end]...])
+            sp[i, :] .= cdp.g(s, x, cdp.shocks[(i, shock_tail...)...])
         end
         Vp = funeval(C, cdp.interp.basis, sp)
         cont = cdp.discount * dot(cdp.weights, Vp)
@@ -311,12 +313,13 @@ Find optimal value for each grid point
 
 - `Tv::Vector{Float64}`: Updated value function vector
 """
-function s_wise_max!(cdp::ContinuousDP, ss::AbstractArray{Float64},
-                     C::Vector{Float64}, Tv::Vector{Float64})
+function s_wise_max!(cdp::ContinuousDP{N}, ss::AbstractArray{Float64},
+                     C::Vector{Float64}, Tv::Vector{Float64}) where {N}
     n = size(ss, 1)
     t = Base.tail(axes(ss))
+    sp = Matrix{Float64}(undef, size(cdp.shocks, 1), N)
     for i in 1:n
-        Tv[i], _ = _s_wise_max(cdp, ss[(i, t...)...], C)
+        Tv[i], _ = _s_wise_max!(cdp, ss[(i, t...)...], C, sp)
     end
     return Tv
 end
@@ -339,13 +342,14 @@ Find optimal value and policy for each grid point
 - `Tv::Vector{Float64}`: Updated value function vector
 - `X::Vector{Float64}`: Updated policy function vector
 """
-function s_wise_max!(cdp::ContinuousDP, ss::AbstractArray{Float64},
+function s_wise_max!(cdp::ContinuousDP{N}, ss::AbstractArray{Float64},
                      C::Vector{Float64}, Tv::Vector{Float64},
-                     X::Vector{Float64})
+                     X::Vector{Float64}) where {N}
     n = size(ss, 1)
     t = Base.tail(axes(ss))
+    sp = Matrix{Float64}(undef, size(cdp.shocks, 1), N)
     for i in 1:n
-        Tv[i], X[i] = _s_wise_max(cdp, ss[(i, t...)...], C)
+        Tv[i], X[i] = _s_wise_max!(cdp, ss[(i, t...)...], C, sp)
     end
     return Tv, X
 end
@@ -414,12 +418,13 @@ Updates policy function vector
 
 - `X::Vector{Float64}`: Updated policy function vector
 """
-function compute_greedy!(cdp::ContinuousDP, ss::AbstractArray{Float64},
-                         C::Vector{Float64}, X::Vector{Float64})
+function compute_greedy!(cdp::ContinuousDP{N}, ss::AbstractArray{Float64},
+                         C::Vector{Float64}, X::Vector{Float64}) where {N}
     n = size(ss, 1)
     t = Base.tail(axes(ss))
+    sp = Matrix{Float64}(undef, size(cdp.shocks, 1), N)
     for i in 1:n
-        _, X[i] = _s_wise_max(cdp, ss[(i, t...)...], C)
+        _, X[i] = _s_wise_max!(cdp, ss[(i, t...)...], C, sp)
     end
     return X
 end
