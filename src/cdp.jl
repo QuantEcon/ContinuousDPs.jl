@@ -265,19 +265,19 @@ end
 """
     _s_wise_max!(cdp, s, C, sp)
 
-Find optimal value and policy for each grid point
+Find optimal value and policy at a given state `s`
 
 # Arguments
 
 - `cdp::ContinuousDP`: Object that contains model parameters
-- `s::AbstractArray{Float64}`: Interpolation nodes
-- `C::Vector{Float64}`: Basis coefficients vector
+- `s`: State point at which to maximize
+- `C`: Basis coefficients vector
 - `sp::Matrix{Float64}`: Workspace for next-state evaluations
 
 # Returns
 
-- `v::Float64`: Updated value
-- `x::Float64`: Updated action
+- `v::Float64`: Optimal value at `s`
+- `x::Float64`: Optimal action at `s`
 """
 function _s_wise_max!(cdp::ContinuousDP, s, C, sp::Matrix{Float64})
     shock_tail = Base.tail(axes(cdp.shocks))
