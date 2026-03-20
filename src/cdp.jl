@@ -131,8 +131,6 @@ end
                  x_lb=cdp.x_lb, x_ub=cdp.x_ub, basis=cdp.interp.basis)
 
 Construct a copy of `cdp`, optionally replacing selected model components.
-
-Passing a new `basis` rebuilds the associated interpolation data.
 """
 function ContinuousDP(cdp::ContinuousDP;
     f = cdp.f,
@@ -158,7 +156,7 @@ algorithm `Algo`.
 
 - `cdp::TCDP<:ContinuousDP{N}`: The dynamic program that was solved.
 - `tol::Float64`: Convergence tolerance used by the solver.
-- `max_iter::Int`: Maximum number of iterations allowed .
+- `max_iter::Int`: Maximum number of iterations allowed.
 - `C::Vector{Float64}`: Basis coefficient vector for the fitted value function.
 - `converged::Bool`: Whether the algorithm converged.
 - `num_iter::Int`: Number of iterations performed.
