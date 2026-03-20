@@ -19,6 +19,9 @@ ContinuousDP(::ContinuousDP)
 
 ```@docs
 solve
+VFI
+PFI
+LQA
 ```
 
 ### Evaluation and Simulation
@@ -32,7 +35,6 @@ simulate!
 ### LQ Approximation
 
 ```@docs
-LQA
 approx_lq
 ```
 

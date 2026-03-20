@@ -599,7 +599,7 @@ Solve the continuous-state dynamic program by the specified method.
 # Arguments
 
 - `cdp::ContinuousDP`: The dynamic program to solve.
-- `method::Type{<:DPAlgorithm}(=PFI)`: Solution method. `VFI` for value
+- `method::Type{<:DPAlgorithm}`: Solution method. `VFI` for value
   function iteration, `PFI` for policy function iteration, or `LQA` for linear
   quadratic approximation. Default is `PFI`.
 - `v_init::Vector{Float64}`: Initial value function values at interpolation
@@ -634,6 +634,13 @@ end
 
 
 # Policy iteration
+@doc """
+    PFI
+
+Policy function iteration algorithm for `solve`.
+"""
+PFI
+
 """
     _solve!(cdp, res, verbose, print_skip)
 
@@ -652,6 +659,13 @@ end
 
 
 # Value iteration
+@doc """
+    VFI
+
+Value function iteration algorithm for `solve`.
+"""
+VFI
+
 """
     _solve!(cdp, res, verbose, print_skip)
 
