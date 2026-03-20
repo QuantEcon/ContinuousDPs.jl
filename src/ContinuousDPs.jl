@@ -6,7 +6,7 @@ using LinearAlgebra, Random
 using QuantEcon
 import QuantEcon:
     bellman_operator, bellman_operator!, compute_greedy!, compute_greedy,
-    evaluate_policy, DDPAlgorithm, solve, simulate, simulate!
+    evaluate_policy, DDPAlgorithm, solve, VFI, PFI, simulate, simulate!
 
 const DPAlgorithm = DDPAlgorithm
 
