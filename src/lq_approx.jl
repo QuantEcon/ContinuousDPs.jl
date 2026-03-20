@@ -5,7 +5,7 @@ approximation.
 References
 ----------
 * M. J. Miranda and P. L. Fackler, Applied Computational Economics and Finance,
-  MIT press, 2002.
+  MIT Press, 2002.
 
 =#
 import QuantEcon.LQ, QuantEcon.ScalarOrArray
@@ -14,21 +14,27 @@ import QuantEcon.LQ, QuantEcon.ScalarOrArray
     approx_lq(s_star, x_star, f_star, Df_star, DDf_star, g_star, Dg_star,
               discount)
 
-Return an approximating LQ instance.
+Construct a `QuantEcon.LQ` instance that approximates the dynamic program around
+a steady state.
 
 # Arguments
-- `s_star::ScalarOrArray{T}`: State variables at the steady-state
-- `x_star::ScalarOrArray{T}`: Action variables at the steady-state
-- `f_star::Real`: Reward function evaluated at the steady-state
-- `Df_star::AbstractVector{T}`: Gradient of f satisfying
-  `Df_star = [f_s', f_x']`
-- `DDf_star::AbstractMatrix{T}`: Hessian of f satisfying
-  `DDf_star::Array = [f_ss f_sx; f_xs f_xx]`
-- `g_star::ScalarOrArray{T}`: State transition function evaluated at the
-  steady-state
-- `Dg_star::AbstractMatrix{T}`: Jacobian of g satisfying `Dg_star = [g_s, g_x]`
-- `discount::Real`: Discount factor
 
+- `s_star::ScalarOrArray{T}`: Steady-state value of the state variable(s).
+- `x_star::ScalarOrArray{T}`: Steady-state value of the action variable(s).
+- `f_star::Real`: Reward function evaluated at the steady state.
+- `Df_star::AbstractVector{T}`: Gradient of the reward function `f` at the
+  steady state, `Df_star = [f_s', f_x']`.
+- `DDf_star::AbstractMatrix{T}`: Hessian of the reward function `f` at the
+  steady state, `DDf_star = [f_ss f_sx; f_xs f_xx]`.
+- `g_star::ScalarOrArray{T}`: State transition function evaluated at the
+  steady state.
+- `Dg_star::AbstractMatrix{T}`: Jacobian of the transition function `g` at the
+  steady state, `Dg_star = [g_s, g_x]`.
+- `discount::Real`: Discount factor.
+
+# Returns
+
+- `lq::QuantEcon.LQ`: The LQ approximation.
 """
 function approx_lq(s_star::ScalarOrArray{T}, x_star::ScalarOrArray{T},
                    f_star::Real, Df_star::AbstractVector{T},
