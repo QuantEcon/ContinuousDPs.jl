@@ -618,7 +618,6 @@ Solve the continuous-state dynamic program by the specified method.
 
 - `res::CDPSolveResult`: Solution object of the dynamic program.
 """
-
 function solve(cdp::ContinuousDP{N}, method::Type{Algo}=PFI;
                v_init::Vector{Float64}=zeros(cdp.interp.length),
                tol::Real=sqrt(eps()), max_iter::Integer=500,
