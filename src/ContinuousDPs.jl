@@ -5,8 +5,8 @@ using LinearAlgebra, Random
 
 using QuantEcon
 import QuantEcon:
-    bellman_operator, bellman_operator!, compute_greedy!, compute_greedy,
-    evaluate_policy, DDPAlgorithm, VFI, PFI, solve, simulate, simulate!
+    bellman_operator!, compute_greedy!, DDPAlgorithm, VFI, PFI, solve,
+    simulate, simulate!
 
 const DPAlgorithm = DDPAlgorithm
 
