@@ -7,7 +7,7 @@ Always reference these instructions first and fallback to search or bash command
 ## Working Effectively
 
 ### Bootstrap and Setup
-- Julia 1.2+ is required. Check version: `julia --version`
+- Julia 1.10+ is required. Check version: `julia --version`
 - Install package dependencies: `julia --project=. -e "using Pkg; Pkg.instantiate()"` -- takes 75 seconds. NEVER CANCEL. Set timeout to 120+ seconds.
 - The package uses standard Julia package structure with `Project.toml` for dependencies
 
@@ -19,8 +19,8 @@ Always reference these instructions first and fallback to search or bash command
 ### Development Workflow
 - Start Julia REPL in package mode: `julia --project=.`
 - Load the package in development: `julia --project=. -e "using ContinuousDPs"`
-- Import required dependencies: `using QuantEcon: PFI, VFI, solve; using BasisMatrices: Basis, ChebParams, SplineParams`
-- ALWAYS import `solve` from QuantEcon when using the solving functionality
+- Import required dependencies: `using ContinuousDPs; using BasisMatrices: Basis, ChebParams, SplineParams`
+- `solve`, `VFI`, `PFI`, and `LQA` are exported by ContinuousDPs
 
 ## Core Functionality Testing
 
@@ -28,7 +28,6 @@ Always reference these instructions first and fallback to search or bash command
 Always test new code with this basic workflow:
 ```julia
 using ContinuousDPs
-using QuantEcon: PFI, VFI, solve
 using BasisMatrices: Basis, ChebParams
 
 # Define reward and transition functions
@@ -74,9 +73,13 @@ ALWAYS run these validation steps after making changes:
 │   ├── ContinuousDPs.jl     # Main module file
 │   ├── cdp.jl               # Core continuous DP functionality
 │   └── lq_approx.jl         # Linear quadratic approximation methods
+├── docs/
+│   ├── make.jl              # Documenter build script
+│   └── src/                 # Documentation source files
 ├── test/
 │   ├── runtests.jl          # Test runner
 │   ├── test_cdp.jl          # Tests for core CDP functionality
+│   ├── test_cdp_multidim.jl # Tests for multi-dimensional CDP
 │   └── test_lq_approx.jl    # Tests for LQ approximation
 ├── examples/
 │   ├── cdp_ex_optgrowth_jl.ipynb    # Optimal growth model example
@@ -101,7 +104,8 @@ ALWAYS run these validation steps after making changes:
 ### Algorithm Types
 - **PFI (Policy Function Iteration)**: Generally faster convergence
 - **VFI (Value Function Iteration)**: More robust but potentially slower
-- Both algorithms available through `QuantEcon.solve()` with method parameter
+- **LQA (Linear Quadratic Approximation)**: Approximates the model around a steady state
+- All algorithms available through `solve()` with method parameter
 
 ### Basis Types  
 - **Chebyshev**: `ChebParams(n, s_min, s_max)` - good general purpose choice
@@ -109,7 +113,7 @@ ALWAYS run these validation steps after making changes:
 - **Linear**: `LinParams(breaks, s_min, s_max)` - simple linear interpolation
 
 ### Debugging Common Issues
-- **`solve` not defined**: Import from QuantEcon: `using QuantEcon: solve`
+- **`solve` not defined**: Ensure `using ContinuousDPs` is present
 - **Method convergence issues**: Try different basis sizes or algorithm (PFI vs VFI)
 - **Simulation errors**: Check that state bounds are consistent with transition function
 - **Performance issues**: Larger basis sizes increase accuracy but slow computation
@@ -130,7 +134,7 @@ ALWAYS run these validation steps after making changes:
 
 ## Dependencies and Compatibility
 - **Core dependencies**: QuantEcon.jl, BasisMatrices.jl, Optim.jl, FiniteDiff.jl
-- **Julia version**: 1.2+ required (see Project.toml)
+- **Julia version**: 1.10+ required (see Project.toml)
 - **Platform support**: Windows, macOS, Linux (all tested in CI)
 - Dependencies install automatically via `Pkg.instantiate()`
 
@@ -144,4 +148,4 @@ ALWAYS run these validation steps after making changes:
 - **Long solve times**: Normal for complex problems. Increase `max_iter` if needed, but be patient
 - **Convergence warnings**: Try different basis size, tolerance, or algorithm
 - **Memory issues**: Reduce basis size or use simpler basis types
-- **Installation issues**: Ensure Julia 1.2+ and try `Pkg.update()` first
+- **Installation issues**: Ensure Julia 1.10+ and try `Pkg.update()` first
