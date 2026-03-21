@@ -1,4 +1,5 @@
 using ContinuousDPs
+using BasisMatrices
 using Documenter
 
 DocMeta.setdocmeta!(ContinuousDPs, :DocTestSetup, :(using ContinuousDPs); recursive=true)
