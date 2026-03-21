@@ -1,4 +1,5 @@
 [deps]
+BasisMatrices = "08854c51-b66b-5062-a90d-8e7ae4547a49"
 ContinuousDPs = "c470661a-f883-5a79-ade0-a473a39194e2"
 Documenter = "e30172f5-a6a5-5a46-863b-614d45cd2de4"
 
