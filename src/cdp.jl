@@ -310,11 +310,11 @@ function _s_wise_max!(cdp::ContinuousDP, s, C, sp::Matrix{Float64})
         Vp = funeval(C, cdp.interp.basis, sp)
         cont = cdp.discount * dot(cdp.weights, Vp)
         flow = cdp.f(s, x)
-        -1 * (flow + cont)
+        return flow + cont
     end
-    res = Optim.optimize(objective, cdp.x_lb(s), cdp.x_ub(s))
-    v = -res.minimum::Float64
-    x = res.minimizer::Float64
+    res = Optim.maximize(objective, cdp.x_lb(s), cdp.x_ub(s))
+    v = Optim.maximum(res)::Float64
+    x = Optim.maximizer(res)::Float64
     return v, x
 end
 
