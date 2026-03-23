@@ -22,7 +22,8 @@ $$
 V(s)
 = \max_{x\in[x_{lb}(s), x_{ub}(s)]} 
     \left \{
-        f(s,x) + \beta \mathbb{E}_{\varepsilon} \left [ V(g(s,x,\varepsilon)) \right ] 
+        f(s,x) + \beta \mathbb{E}_{\varepsilon} 
+            \left [ V(g(s,x,\varepsilon)) \right ] 
     \right \}
 $$
 where
@@ -33,63 +34,82 @@ where
 - $\varepsilon$ is a **random shock**,
     (i.i.d. across periods, independent of the state and the action),
 - $\beta \in (0, 1)$ is the **discount factor**, and
-- $x_{\mathrm{lb}}(s)$ and $x_{\mathrm{ub}}(s)$ are state-dependent **action bounds**.
+- $x_{\mathrm{lb}}(s)$ and $x_{\mathrm{ub}}(s)$ are state-dependent
+    **action bounds**.
 
-This package employs the **Bellman equation collocation method** (Miranda and Fackler 2002, Chapter 9): The value function $ V $
- is approximated by a linear combination of basis functions (Chebyshev polynomials, B-splines, or linear functions) and is required to satisfy the Bellman equation at the collocation nodes.
+This package employs the **Bellman equation collocation method** (Miranda and 
+Fackler 2002, Chapter 9): The value function $ V $ is approximated by a linear 
+combination of basis functions (Chebyshev polynomials, B-splines, or linear 
+functions) and is required to satisfy the Bellman equation at the collocation 
+nodes.
 
-To solve the problem, construct a `ContinuousDP` instance by passing the primitives of the model:
+To solve the problem, construct a `ContinuousDP` instance by passing the 
+primitives of the model:
+
 ```Julia
 cdp = ContinuousDP(f, g, discount, shocks, weights, x_lb, x_ub, basis)
 ```
 where
-- `f`, `g`, `x_lb`, and `x_ub` are callable objects that represent the reward function, the state transition function, and the lower and upper action bounds functions, respectively,
+- `f`, `g`, `x_lb`, and `x_ub` are callable objects that represent the reward 
+    function, the state transition function, and the lower and upper action 
+    bounds functions, respectively,
 - `discount` is the discount factor,
-- `shocks` and `weights` specify a discretization of the distribution of $ \varepsilon $ (a vector of nodes and their probability weights), and
-- `basis` is a `Basis` object from [`BasisMatrices.jl`](https://github.com/QuantEcon/BasisMatrices.jl) that contains the interpolation basis information.
+- `shocks` and `weights` specify a discretization of the distribution of 
+    $ \varepsilon $ (a vector of nodes and their probability weights), and
+- `basis` is a `Basis` object from 
+    [`BasisMatrices.jl`](https://github.com/QuantEcon/BasisMatrices.jl) that 
+    contains the interpolation basis information.
 
-Then call `solve(cdp)` to obtain the value function, policy function, and residuals.
+Then call `solve(cdp)` to obtain the value function, policy function, and 
+residuals.
 
 ## Example usage
 
-A deterministic optimal growth case:
+A stochastic optimal growth model from a 
+[QuantEcon lecture](https://julia.quantecon.org/dynamic_programming/optgrowth.html):
 
 ```Julia
-using ContinuousDPs, BasisMatrices
+using BasisMatrices
+using ContinuousDPs
+using Random
+using PythonPlot
 
-alpha = 0.65
-beta = 0.95
+# For reproducible results
+seed = 42
+rng = MersenneTwister(seed);
 
-f(s, x) = log(x)
-g(s, x, e) = s^alpha - x
+# Specify the parameters
+function OptimalGrowthModel(;
+        alpha = 0.4, beta = 0.96, s_min = 1e-5, s_max = 4.,
+        mu = 0.0, sigma = 0.1
+    )
+    f(s, x) = log(x)
+    g(s, x, e) = (s - x)^alpha * e
+    x_lb(s) = s_min
+    x_ub(s) = s
+    return (; alpha, beta, s_min, s_max, mu, sigma,
+            f, g, x_lb, x_ub)  # NamedTuple
+end
 
-shocks = [1.]
-weights = [1.]
-x_lb(s) = 0
-x_ub(s) = s
+p = OptimalGrowthModel();
 
-s_init = 0.1
-ts_length = 25
+# Set shocks and weights
+shock_size = 250
+shocks = exp.(p.mu .+ p.sigma * randn(rng, shock_size))
+weights = fill(1/shock_size, shock_size);
 
+# Construct a `Basis` object
 n = 30
-s_min, s_max = 0.1, 2.
-basis = Basis(ChebParams(n, s_min, s_max))
+basis = Basis(ChebParams(n, p.s_min, p.s_max))
 
 # Solve DP
-cdp = ContinuousDP(f, g, beta, shocks, weights, x_lb, x_ub, basis);
-res = solve(cdp, PFI, tol=sqrt(eps()), max_iter=500);
-
-# Value and policy on collocation nodes
-res.V
-res.X
+cdp = ContinuousDP(p.f, p.g, p.beta, shocks, weights, p.x_lb, p.x_ub, basis);
+res = solve(cdp);
 
 # Evaluate on grids
-eval_nodes = collect(range(s_min, stop=s_max, length=500))
-set_eval_nodes!(res, eval_nodes)
-
-# Simulate the state process
-s_path = simulate(res, s_init, ts_length)
-
+grid_size = 200
+grid_y = collect(range(p.s_min, stop=p.s_max, length=grid_size))
+set_eval_nodes!(res, grid_y);
 ```
 
 See the demo notebooks for further examples.
