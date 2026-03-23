@@ -35,6 +35,21 @@ where
 - $\beta \in (0, 1)$ is the **discount factor**, and
 - $x_{\mathrm{lb}}(s)$ and $x_{\mathrm{ub}}(s)$ are state-dependent **action bounds**.
 
+This package employs the **Bellman equation collocation method** (Miranda and Fackler 2002, Chapter 9): The value function $ V $
+ is approximated by a linear combination of basis functions (Chebyshev polynomials, B-splines, or linear functions) and is required to satisfy the Bellman equation at the collocation nodes.
+
+To solve the problem, construct a `ContinuousDP` instance by passing the primitives of the model:
+```Julia
+cdp = ContinuousDP(f, g, discount, shocks, weights, x_lb, x_ub, basis)
+```
+where
+- `f`, `g`, `x_lb`, and `x_ub` are callable objects that represent the reward function, the state transition function, and the lower and upper action bounds functions, respectively,
+- `discount` is the discount factor,
+- `shocks` and `weights` specify a discretization of the distribution of $ \varepsilon $ (a vector of nodes and their probability weights), and
+- `basis` is a `Basis` object from [`BasisMatrices.jl`](https://github.com/QuantEcon/BasisMatrices.jl) that contains the interpolation basis information.
+
+Then call `solve(cdp)` to obtain the value function, policy function, and residuals.
+
 ## Example usage
 
 A deterministic optimal growth case:
