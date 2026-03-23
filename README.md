@@ -14,6 +14,9 @@ To install the package, open the Julia package manager (Pkg) and type:
 add https://github.com/QuantEcon/ContinuousDPs.jl
 ```
 
+## Supported problem class
+
+
 ## Example usage
 Consider the deterministic optimal growth case:
 
@@ -62,3 +65,6 @@ s_path = simulate(res, s_init, ts_length)
 * [Stochastic Optimal Growth Model](http://nbviewer.jupyter.org/github/QuantEcon/ContinuousDPs.jl/blob/main/examples/cdp_ex_optgrowth_jl.ipynb)
 * [Examples from Miranda and Fackler 2002, Chapter 9](http://nbviewer.jupyter.org/github/QuantEcon/ContinuousDPs.jl/blob/main/examples/cdp_ex_MF_jl.ipynb)
 * [LQ Approximation with `QuantEcon.jl` and `ContinuousDPs.jl`](http://nbviewer.jupyter.org/github/QuantEcon/ContinuousDPs.jl/blob/main/examples/lqapprox_jl.ipynb)
+
+
+## References
