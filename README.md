@@ -16,9 +16,28 @@ add https://github.com/QuantEcon/ContinuousDPs.jl
 
 ## Supported problem class
 
+`ContinuousDPs.jl` solves infinite-horizon dynamic programs of the form
+
+$$
+V(s)
+= \max_{x\in[x_{lb}(s), x_{ub}(s)]} 
+    \left \{
+        f(s,x) + \beta \mathbb{E}_{\varepsilon} \left [ V(g(s,x,\varepsilon)) \right ] 
+    \right \}
+$$
+where
+- $s \in \mathbb{R}^d$ is the **state** (continuous, possibly multi-dimensional),
+- $x \in \mathbb{R}$ is the **action** (continuous, 1-dimensional),
+- $f(s, x)$ is the **reward** function,
+- $g(s, x, \varepsilon)$ is the **state transition** function,
+- $\varepsilon$ is a **random shock**,
+    (i.i.d. across periods, independent of the state and the action),
+- $\beta \in (0, 1)$ is the **discount factor**, and
+- $x_{\mathrm{lb}}(s)$ and $x_{\mathrm{ub}}(s)$ are state-dependent **action bounds**.
 
 ## Example usage
-Consider the deterministic optimal growth case:
+
+A deterministic optimal growth case:
 
 ```Julia
 using ContinuousDPs, BasisMatrices
@@ -58,7 +77,7 @@ s_path = simulate(res, s_init, ts_length)
 
 ```
 
-
+See the demo notebooks for further examples.
 
 ## Demo Notebooks
 
