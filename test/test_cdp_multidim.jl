@@ -1,0 +1,211 @@
+@testset "Multidimensional-state stochastic optimal growth" begin
+    # ==================================================
+    # Santos (1999) Section 7.3 Tests
+    # ==================================================
+    
+    # Model parameters (as in Santos, 1999, Sec. 7.3)
+    beta = 0.95
+    lambda = 1 / 3
+    A = 10.0
+    alpha = 0.34
+    delta = 1.0
+    rho = 0.90
+    sigma_epsilon = 0.008
+
+    # Random seed for reproducibility
+    seed = 1234
+
+    # State domains (as in Santos, 1999, Sec. 7.3)
+    logz_min, logz_max = -0.32, 0.32
+    k_min, k_max = 0.10, 10.0
+
+    # For numerical stability
+    x_lb(s) = 1e-10
+    x_ub(s) = 1 - 1e-10
+
+    # Mesh size (as in Santos, 1999, Sec. 7.3)
+    # Exclude (143, 9) and (500, 33) due to high computational cost
+    mesh_setting = (43, 3)
+    nk, nlogz = mesh_setting
+    grid_size_k = (k_max - k_min) / (nk - 1)
+    grid_size_logz = (logz_max - logz_min) / (nlogz - 1)
+    mesh_size_h = sqrt(grid_size_k^2 + grid_size_logz^2)
+
+    # Model functions
+    # Production and Santos (7.4)-style mapping: given leisure x -> (c, k')
+    # Production function
+    y(k, z, x) = z * A * k^alpha * (1 - x)^(1 - alpha)
+    # Consumption and k prime based on Santos equation (7.4)
+    function c_from_x(k, z, x) 
+        term1 = z * A * k^alpha * (1 - x)^(-alpha)
+        term2 = (lambda / (1 - lambda)) * (1 - alpha) * x
+        return term1 * term2
+    end
+    kprime_from_x(k, z, x) = y(k, z, x) + (1 - delta) * k - c_from_x(k, z, x)
+
+    # Reward function
+    function f(s, x)
+        k, logz = s
+        z = exp(logz)
+        if !(0 < x < 1)
+            return -Inf
+        end
+        c = c_from_x(k, z, x)
+        kp = kprime_from_x(k, z, x)
+        if c <= 0 || kp < 0
+            return -Inf
+        end
+        return lambda * log(c) + (1 - lambda) * log(x)
+    end
+
+    # Transition function
+    function g(s, x, e)
+        k, logz = s
+        z = exp(logz)
+        kp = kprime_from_x(k, z, x)
+        logzp = rho * logz + e
+        return (kp, logzp)
+    end
+
+    # Analytical solution (delta = 1)
+    ab = alpha * beta
+    # Optimal leisure (constant)
+    x_star_numerator = (1 - lambda) * (1 - ab)
+    x_star_denominator = lambda * (1 - alpha) + ((1 - lambda) * (1 - ab))
+    x_star = x_star_numerator / x_star_denominator
+
+    # Policy function (constant fraction of production)
+    policy(k, logz) = ab * exp(logz) * A * k^alpha * (1 - x_star)^(1 - alpha)
+
+    # Value function: V(k, z) = B + C*log(k) + D*log(z)
+    C = lambda * alpha / (1 - ab)
+    D = lambda / ((1 - ab) * (1 - rho * beta))
+    const_term1 = lambda * (log(1 - ab) + log(A) + (1 - alpha) * log(1 - x_star))
+    const_term2 = (1 - lambda) * log(x_star) 
+    const_term3 = beta * C * (log(ab) + log(A) + (1 - alpha) * log(1 - x_star))
+    B = (const_term1 + const_term2 + const_term3) / (1 - beta)
+    v_star(k, logz) = B + C * log(k) + D * logz
+
+    results = Dict()
+
+    # Shock discretization (Gauss-Hermite quadrature)
+    n_shocks = 7
+    shocks, weights = qnwnorm(n_shocks, 0.0, sigma_epsilon^2)
+
+    # Basis configurations: (label, basis, policy_tol, value_tol)
+    deg_k, deg_z = 2, 3
+    dk = min(deg_k, nk - 1)
+    dz = min(deg_z, nlogz - 1)
+    breaks_k = nk - (dk - 1)
+    breaks_z = nlogz - (dz - 1)
+
+    basis_configs = [
+    (
+        "Linear",
+        Basis(LinParams(nk, k_min, k_max),
+              LinParams(nlogz, logz_min, logz_max)),
+        0.4 * mesh_size_h,       # policy_tol: Santos (1999) Table 16
+        24 * mesh_size_h^2,      # value_tol:  Santos (1999) Table 16
+    ),
+    (
+        "Spline",
+        # Spline degree: quadratic over k, linear over logz
+        # Santos (1999) footnote 17: shape-preserving spline over k,
+        # cubic spline over z
+        Basis(SplineParams(breaks_k, k_min, k_max, dk),
+              SplineParams(breaks_z, logz_min, logz_max, dz)),
+        1.92e-2,   # policy_tol: Santos (1999) Table 20
+        9.58e-1,   # value_tol:  Santos (1999) Table 20
+    ),
+    (
+        "Chebyshev",
+        # Not a Santos (1999) benchmark
+        Basis(ChebParams(nk, k_min, k_max),
+              ChebParams(nlogz, logz_min, logz_max)),
+        1.12e-1 * 10,  # policy_tol: Table 16 with safety factor 10
+        2.61 * 10,     # value_tol:  Table 16 with safety factor 10
+    ),
+    ] 
+
+    for (basis_label, basis, policy_tol, value_tol) in basis_configs
+        @testset "$basis_label Basis with Multiple Methods" begin
+
+            # Build DP
+            cdp = ContinuousDP(f, g, beta, shocks, weights, x_lb, x_ub, basis)
+            @test ndims(cdp) == 2
+
+            for method in [VFI, PFI]
+                test_name = "$method + $basis_label"
+
+                # Analytical targets on interpolation nodes
+                S = cdp.interp.S
+                k_nodes = @view S[:, 1]
+                logz_nodes = @view S[:, 2]
+                v_star_on_S = v_star.(k_nodes, logz_nodes)
+                k_prime_star_on_S = policy.(k_nodes, logz_nodes)
+
+                # Solve DP
+                res = @inferred solve(cdp, method, max_iter=500, tol=sqrt(eps()), verbose=0)
+                @test ndims(res) == 2
+
+                results[test_name] = res
+                x_hat = vec(res.X)
+                k_hat = first.(g.(eachrow(S), x_hat, 0.0))
+
+                # Convergence tests
+                @test res.converged
+
+                # Policy function benchmark check
+                @test maximum(abs, k_hat .- k_prime_star_on_S) <= policy_tol
+
+                # Value function benchmark check
+                @test maximum(abs, res.V .- v_star_on_S) <= value_tol
+
+                # set_eval_nodes! 
+                k_grid = collect(range(k_min, k_max, length=15))
+                logz_grid = collect(range(logz_min, logz_max, length=7))
+                @test_nowarn set_eval_nodes!(res, k_grid, logz_grid)
+            end
+
+            res = solve(cdp, verbose=0)
+
+            # Test set_eval_nodes! for NTuple{N,AbstractVector}
+            k_grid = range(k_min, k_max, length=15)
+            logz_grid = range(logz_min, logz_max, length=7)
+            @test_nowarn set_eval_nodes!(res, k_grid, logz_grid)
+
+            # Test callable interface
+            V, X, resid = res(res.eval_nodes)
+            @test V == res.V
+            @test X == res.X
+            @test resid == res.resid
+        end
+    end
+
+    @testset "simulate (PFI, linear basis)" begin
+        res = results["PFI + Linear"]
+
+        # simulate
+        s_init = [0.1, 0.0]
+        ts_length = 50
+        rng = MersenneTwister(seed)
+        s_path = @inferred simulate(rng, res, s_init, ts_length)
+        k_path = @view s_path[1, :]
+        logz_path = @view s_path[2, :]
+
+        # Check if k stays within bounds
+        @test all(k_path .>= k_min) && all(k_path .<= k_max)
+
+        # Check if logz stays within bounds
+        @test all(logz_path .>= logz_min) && all(logz_path .<= logz_max)
+
+        # Test simulate methods without `rng`
+        s_path0 = Array{Float64}(undef, 2, ts_length)
+        s_path1 = @inferred ContinuousDPs.simulate!(s_path0, res, s_init)
+        @test s_path1 == s_path0
+
+        s_path2 = @inferred simulate(res, s_init, ts_length)
+        @test size(s_path2) == (2, ts_length)
+    end
+
+end
