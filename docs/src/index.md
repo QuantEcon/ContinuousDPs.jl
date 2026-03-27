@@ -18,14 +18,14 @@ add https://github.com/QuantEcon/ContinuousDPs.jl
 
 `ContinuousDPs.jl` solves infinite-horizon dynamic programs of the form
 
-$$
+```math
 V(s)
 = \max_{x\in[x_{lb}(s), x_{ub}(s)]} 
     \left \{
         f(s,x) + \beta \mathbb{E}_{\varepsilon} 
             \left [ V(g(s,x,\varepsilon)) \right ] 
     \right \}
-$$
+```
 where
 - $s \in \mathbb{R}^d$ is the **state** (continuous, possibly multi-dimensional),
 - $x \in \mathbb{R}$ is the **action** (continuous, 1-dimensional),
@@ -38,7 +38,7 @@ where
     **action bounds**.
 
 This package employs the **Bellman equation collocation method** (Miranda and 
-Fackler 2002, Chapter 9): The value function $ V $ is approximated by a linear 
+Fackler 2002, Chapter 9): The value function $V$ is approximated by a linear 
 combination of basis functions (Chebyshev polynomials, B-splines, or linear 
 functions) and is required to satisfy the Bellman equation at the collocation 
 nodes.
@@ -55,7 +55,7 @@ where
     bounds functions, respectively,
 - `discount` is the discount factor,
 - `shocks` and `weights` specify a discretization of the distribution of 
-    $ \varepsilon $ (a vector of nodes and their probability weights), and
+    $\varepsilon$ (a vector of nodes and their probability weights), and
 - `basis` is a `Basis` object from 
     [`BasisMatrices.jl`](https://github.com/QuantEcon/BasisMatrices.jl) that 
     contains the interpolation basis information.
