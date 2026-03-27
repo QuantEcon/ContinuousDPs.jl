@@ -72,7 +72,6 @@ A stochastic optimal growth model from a
 using BasisMatrices
 using ContinuousDPs
 using Random
-using PythonPlot
 
 # For reproducible results
 seed = 42
