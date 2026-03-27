@@ -18,14 +18,14 @@ add https://github.com/QuantEcon/ContinuousDPs.jl
 
 `ContinuousDPs.jl` solves infinite-horizon dynamic programs of the form
 
-$$
+```math
 V(s)
 = \max_{x\in[x_{lb}(s), x_{ub}(s)]} 
     \left \{
         f(s,x) + \beta \mathbb{E}_{\varepsilon} 
             \left [ V(g(s,x,\varepsilon)) \right ] 
     \right \}
-$$
+```
 where
 - $s \in \mathbb{R}^d$ is the **state** (continuous, possibly multi-dimensional),
 - $x \in \mathbb{R}$ is the **action** (continuous, 1-dimensional),
