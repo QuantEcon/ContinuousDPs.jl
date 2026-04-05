@@ -103,7 +103,7 @@ set_eval_nodes!(res, grid_y);
 
 res.V  # Value function on evaluation grid
 res.X  # Policy function on evaluation grid
-res.resid  # Bellman equation residual
+res.resid  # Bellman equation residuals on evaluation grid
 
 # Simulate a sample path of the state variable
 s_init = 0.1
