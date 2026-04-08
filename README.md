@@ -116,6 +116,6 @@ See the demo notebooks for further examples.
 ## Demo Notebooks
 
 * [Stochastic Optimal Growth Model](https://nbviewer.org/github/QuantEcon/ContinuousDPs.jl/blob/main/examples/cdp_ex_optgrowth_jl.ipynb)
-* [Multidimensional-state Stochastic Optimal Growth Model from Santos (1999) Section 7.3](https://nbviewer.jupyter.org/github/QuantEcon/ContinuousDPs.jl/blob/main/examples/cdp_ex_optgrowth_multidim_jl.ipynb)
+* [Multidimensional-state Stochastic Optimal Growth Model from Santos (1999) Section 7.3](https://nbviewer.org/github/QuantEcon/ContinuousDPs.jl/blob/main/examples/cdp_ex_optgrowth_multidim_jl.ipynb)
 * [Examples from Miranda and Fackler 2002, Chapter 9](https://nbviewer.org/github/QuantEcon/ContinuousDPs.jl/blob/main/examples/cdp_ex_MF_jl.ipynb)
 * [LQ Approximation with `QuantEcon.jl` and `ContinuousDPs.jl`](https://nbviewer.org/github/QuantEcon/ContinuousDPs.jl/blob/main/examples/lqapprox_jl.ipynb)
