@@ -1,0 +1,5 @@
+[deps]
+BasisMatrices = "08854c51-b66b-5062-a90d-8e7ae4547a49"
+BenchmarkTools = "6e4b80f9-dd63-53aa-95a3-0cdb28fa8baf"
+ContinuousDPs = "c470661a-f883-5a79-ade0-a473a39194e2"
+QuantEcon = "fcd29c91-0bd7-5a09-975d-7ac3f643a60c"
