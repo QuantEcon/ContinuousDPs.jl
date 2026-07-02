@@ -18,8 +18,12 @@ interpolation domain:
 * `LinParams`: piecewise linear weights, extrapolated linearly outside the
   domain.
 
-Only `Float64` coefficients and points are supported, and only the basis
-functions themselves (derivative order 0).
+The kernels work in `Float64` internally: evaluation points are accepted as
+`Real` and converted to `Float64`, while basis coefficients are required to
+be `Float64` (so that unintended use with other numeric types, e.g.
+`BigFloat` or AD dual numbers, fails at dispatch instead of silently losing
+precision). Only the basis functions themselves are evaluated (derivative
+order 0).
 =#
 using BasisMatrices: BasisParams, ChebParams, SplineParams, LinParams, Basis,
                      evalbase
@@ -95,8 +99,8 @@ PointEvalCache(p::LinParams) = LinEvalCache(p, Vector{Float64}(undef, 2))
 PointEvalCache(p::BasisParams) =
     GenericEvalCache(p, Vector{Float64}(undef, length(p)))
 
-# Scalar version of `BasisMatrices.lookup(table, x, 3)` without the endpoint
-# scans (rare branches only).
+# Scalar version of `BasisMatrices.lookup(table, x, 3)`; the scans for
+# repeated endpoint values run only in the rare out-of-range branches.
 @inline function _lookup3(table::AbstractVector, x::Real)
     m = length(table)
     ind = searchsortedfirst(table, x) - 1
@@ -249,8 +253,8 @@ using (and overwriting) the workspace `fec`. Equivalent to
 
 - `fec::FunEvalCache{N}`: Workspace constructed from the same `Basis` that
   `C` was fitted on.
-- `C::AbstractVector`: Basis coefficient vector, in the same (expanded)
-  ordering used by `funeval`.
+- `C::AbstractVector{Float64}`: Basis coefficient vector, in the same
+  (expanded) ordering used by `funeval`.
 - `x`: Evaluation point: a `Real` if `N == 1`, otherwise anything indexable
   of length `N` (e.g. `Tuple`, `AbstractVector`).
 
@@ -258,7 +262,8 @@ using (and overwriting) the workspace `fec`. Equivalent to
 
 - `::Float64`: Value of the interpolant at `x`.
 """
-function funeval_point!(fec::FunEvalCache{N}, C::AbstractVector, x) where N
+function funeval_point!(fec::FunEvalCache{N}, C::AbstractVector{Float64},
+                        x) where N
     firsts_nvals = ntuple(
         d -> point_evalbase!(fec.caches[d], _coord(x, d)), Val(N)
     )
