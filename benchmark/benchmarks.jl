@@ -19,7 +19,8 @@ Covers the main computational kernels and end-to-end solves:
 using BenchmarkTools
 using ContinuousDPs
 using ContinuousDPs:
-    _s_wise_max!, bellman_operator!, compute_greedy!, evaluate_policy!
+    _s_wise_max!, bellman_operator!, compute_greedy!, evaluate_policy!,
+    FunEvalCache
 using BasisMatrices: Basis, ChebParams, SplineParams
 using QuantEcon: qnwlogn, qnwnorm
 
@@ -122,9 +123,9 @@ for (label, cdp) in cases
 
     # Per-state optimization kernel (#73)
     s_mid = N == 1 ? cdp.interp.S[div(n, 2)] : cdp.interp.S[div(n, 2), :]
-    sp = Matrix{Float64}(undef, size(cdp.shocks, 1), N)
+    fec = FunEvalCache(cdp.interp.basis)
     grp["s_wise_max_one_state"] =
-        @benchmarkable _s_wise_max!($cdp, $s_mid, $C0, $sp)
+        @benchmarkable _s_wise_max!($cdp, $s_mid, $C0, $fec)
 
     # State loops over the kernel
     grp["bellman_operator"] = @benchmarkable bellman_operator!(
