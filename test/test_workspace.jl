@@ -1,4 +1,22 @@
-using ContinuousDPs: CDPWorkspace, bellman_operator!, policy_iteration_operator!
+using ContinuousDPs: CDPWorkspace, bellman_operator!, policy_iteration_operator!,
+                     _max_abs_diff, operator_iteration!
+
+@testset "_max_abs_diff" begin
+    @test _max_abs_diff([1.0, 2.0], [1.5, 0.5]) == 1.5
+    @test _max_abs_diff([0.0], [0.0]) == 0.0
+    # NaN must propagate: a diverged iteration (Inf - Inf = NaN) must not be
+    # reported as converged
+    @test isnan(_max_abs_diff([NaN], [NaN]))
+    @test isnan(_max_abs_diff([1.0, NaN, 2.0], [1.0, NaN, 0.0]))
+    @test isnan(_max_abs_diff([Inf], [Inf]))
+
+    # End-to-end: an operator that diverges to non-finite values must not be
+    # declared converged
+    diverge!(C) = (C .= NaN; C)
+    converged, num_iter =
+        operator_iteration!(diverge!, [0.0, 0.0], 1e-8, 10, verbose=0)
+    @test !converged
+end
 
 @testset "CDPWorkspace" begin
     beta = 0.95
