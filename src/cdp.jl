@@ -283,8 +283,13 @@ end
 
 #= Methods =#
 
+# Non-copying access to the i-th point of a set of points stored as a
+# Vector (one point = one scalar) or a Matrix (one point = one row).
+_row(A::AbstractVector, i::Int) = A[i]
+_row(A::AbstractMatrix, i::Int) = view(A, i, :)
+
 """
-    _s_wise_max!(cdp, s, C, sp)
+    _s_wise_max!(cdp, s, C, fec)
 
 Find the optimal value and action at a given state `s`.
 
@@ -293,24 +298,24 @@ Find the optimal value and action at a given state `s`.
 - `cdp::ContinuousDP`: The dynamic program.
 - `s`: State point at which to maximize.
 - `C`: Basis coefficient vector for the value function.
-- `sp::Matrix{Float64}`: Workspace for next-state evaluations.
+- `fec::FunEvalCache`: Workspace for evaluating the value function at the
+  next states.
 
 # Returns
 
 - `v::Float64`: Optimal value at `s`.
 - `x::Float64`: Optimal action at `s`.
 """
-function _s_wise_max!(cdp::ContinuousDP, s, C, sp::Matrix{Float64})
-    shock_tail = Base.tail(axes(cdp.shocks))
-
+function _s_wise_max!(cdp::ContinuousDP, s, C, fec::FunEvalCache)
     function objective(x)
-        for i in 1:size(sp, 1)
-            sp[i, :] .= cdp.g(s, x, cdp.shocks[(i, shock_tail...)...])
+        cont = 0.0
+        for j in eachindex(cdp.weights)
+            e = _row(cdp.shocks, j)
+            s_next = cdp.g(s, x, e)
+            cont += cdp.weights[j] * funeval_point!(fec, C, s_next)
         end
-        Vp = funeval(C, cdp.interp.basis, sp)
-        cont = cdp.discount * dot(cdp.weights, Vp)
         flow = cdp.f(s, x)
-        return flow + cont
+        return flow + cdp.discount * cont
     end
     res = Optim.maximize(objective, cdp.x_lb(s), cdp.x_ub(s))
     v = Optim.maximum(res)::Float64
@@ -334,13 +339,12 @@ Find optimal value for each grid point.
 
 - `Tv::Vector{Float64}`: Updated value function vector.
 """
-function s_wise_max!(cdp::ContinuousDP{N}, ss::AbstractArray{Float64},
-                     C::Vector{Float64}, Tv::Vector{Float64}) where {N}
+function s_wise_max!(cdp::ContinuousDP, ss::AbstractArray{Float64},
+                     C::Vector{Float64}, Tv::Vector{Float64})
     n = size(ss, 1)
-    t = Base.tail(axes(ss))
-    sp = Matrix{Float64}(undef, size(cdp.shocks, 1), N)
+    fec = FunEvalCache(cdp.interp.basis)
     for i in 1:n
-        Tv[i], _ = _s_wise_max!(cdp, ss[(i, t...)...], C, sp)
+        Tv[i], _ = _s_wise_max!(cdp, _row(ss, i), C, fec)
     end
     return Tv
 end
@@ -363,14 +367,13 @@ Find optimal value and action for each grid point.
 - `Tv::Vector{Float64}`: Updated value function vector.
 - `X::Vector{Float64}`: Updated policy function vector.
 """
-function s_wise_max!(cdp::ContinuousDP{N}, ss::AbstractArray{Float64},
+function s_wise_max!(cdp::ContinuousDP, ss::AbstractArray{Float64},
                      C::Vector{Float64}, Tv::Vector{Float64},
-                     X::Vector{Float64}) where {N}
+                     X::Vector{Float64})
     n = size(ss, 1)
-    t = Base.tail(axes(ss))
-    sp = Matrix{Float64}(undef, size(cdp.shocks, 1), N)
+    fec = FunEvalCache(cdp.interp.basis)
     for i in 1:n
-        Tv[i], X[i] = _s_wise_max!(cdp, ss[(i, t...)...], C, sp)
+        Tv[i], X[i] = _s_wise_max!(cdp, _row(ss, i), C, fec)
     end
     return Tv, X
 end
@@ -440,13 +443,12 @@ Compute the greedy policy for the given basis coefficients.
 
 - `X::Vector{Float64}`: Updated policy function vector.
 """
-function compute_greedy!(cdp::ContinuousDP{N}, ss::AbstractArray{Float64},
-                         C::Vector{Float64}, X::Vector{Float64}) where {N}
+function compute_greedy!(cdp::ContinuousDP, ss::AbstractArray{Float64},
+                         C::Vector{Float64}, X::Vector{Float64})
     n = size(ss, 1)
-    t = Base.tail(axes(ss))
-    sp = Matrix{Float64}(undef, size(cdp.shocks, 1), N)
+    fec = FunEvalCache(cdp.interp.basis)
     for i in 1:n
-        _, X[i] = _s_wise_max!(cdp, ss[(i, t...)...], C, sp)
+        _, X[i] = _s_wise_max!(cdp, _row(ss, i), C, fec)
     end
     return X
 end
