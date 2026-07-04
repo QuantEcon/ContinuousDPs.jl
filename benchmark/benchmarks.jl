@@ -27,23 +27,28 @@ using QuantEcon: qnwlogn, qnwnorm
 #= Model definitions =#
 
 # 1-D stochastic optimal growth
-# The next state is kept within the interpolation domain [s_min, s_max]:
-# feasible actions can otherwise map s' outside (even negative), where the
-# fitted value function is extrapolated -- catastrophically so for the
-# Chebyshev basis, making VFI diverge.
+# The action bounds are tightened so that s' stays within the interpolation
+# domain [s_min, s_max] for all quadrature shock nodes: feasible actions can
+# otherwise map s' outside (even negative), where the fitted value function
+# is extrapolated -- catastrophically so for the Chebyshev basis, making VFI
+# diverge. Restricting the action set (rather than clamping s' inside `g`)
+# keeps the transition law smooth.
 function growth_model_1d(basis, s_min, s_max)
     alpha = 0.65
     f(s, x) = log(x)
-    g(s, x, e) = clamp(e * s^alpha - x, s_min, s_max)
+    g(s, x, e) = e * s^alpha - x
     shocks, weights = qnwlogn(9, 0.0, 0.01)
-    x_lb(s) = 1e-8
-    x_ub(s) = s
+    e_min, e_max = extrema(shocks)
+    x_lb(s) = max(1e-8, e_max * s^alpha - s_max)
+    x_ub(s) = min(s, e_min * s^alpha - s_min)
     return ContinuousDP(f, g, 0.95, shocks, weights, x_lb, x_ub, basis)
 end
 
 # 2-D stochastic optimal growth with leisure (Santos, 1999, Sec. 7.3;
-# same model as in test/test_cdp_multidim.jl). As in the 1-D model, the
-# capital stock is kept within the interpolation domain [k_min, k_max].
+# same model as in test/test_cdp_multidim.jl). The capital stock is kept
+# within the interpolation domain [k_min, k_max] by clamping in `g`: unlike
+# in the 1-D model, the action bound ensuring k' <= k_max has no closed
+# form (k' is transcendental in x).
 function growth_model_2d(basis, k_min, k_max)
     beta = 0.95
     lambda = 1 / 3
