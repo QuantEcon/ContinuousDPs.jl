@@ -59,10 +59,17 @@
     end
 
     # Transition function
+    # During the inner maximization, candidate actions can map the capital
+    # stock outside the interpolation domain [k_min, k_max] (e.g. x -> 0
+    # gives k' ~ z*A*k^alpha, up to ~30), where the fitted value function is
+    # extrapolated. For global polynomial (Chebyshev) bases such
+    # extrapolation is catastrophically large, so keep the next state within
+    # the domain. The true optimal policy maps the domain well inside
+    # [k_min, k_max], so the clamp does not affect the analytical checks.
     function g(s, x, e)
         k, logz = s
         z = exp(logz)
-        kp = kprime_from_x(k, z, x)
+        kp = clamp(kprime_from_x(k, z, x), k_min, k_max)
         logzp = rho * logz + e
         return (kp, logzp)
     end
@@ -109,13 +116,16 @@
     ),
     (
         "Spline",
-        # Spline degree: quadratic over k, linear over logz
-        # Santos (1999) footnote 17: shape-preserving spline over k,
-        # cubic spline over z
+        # Spline degree: quadratic over k and over logz (with only 3 nodes
+        # over logz, cubic is infeasible). Santos (1999) footnote 17 uses
+        # shape-preserving spline over k and cubic spline over z, so the
+        # Table 20 policy error (1.92e-4) need not be attained here; the
+        # collocation solution's policy error is ~1.1e-2, hence the safety
+        # factor 100.
         Basis(SplineParams(breaks_k, k_min, k_max, dk),
               SplineParams(breaks_z, logz_min, logz_max, dz)),
-        1.92e-2,   # policy_tol: Santos (1999) Table 20
-        9.58e-1,   # value_tol:  Santos (1999) Table 20
+        1.92e-4 * 100,  # policy_tol: Santos (1999) Table 20 with safety factor 100
+        9.58e-1,        # value_tol:  Santos (1999) Table 20
     ),
     (
         "Chebyshev",
