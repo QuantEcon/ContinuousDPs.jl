@@ -205,20 +205,25 @@ Base.ndims(::ContinuousDP{N}) where {N} = N
 Base.ndims(::CDPSolveResult{Algo,N}) where {Algo,N} = N
 
 """
-    evaluate!(res)
+    evaluate!(res[, fec])
 
 Evaluate the value function and the policy function at the evaluation nodes.
 
 # Arguments
 
 - `res::CDPSolveResult`: Solution object to update in place.
+- `fec::FunEvalCache`: Workspace for point evaluation of the value function.
+  Constructed internally if not given.
 """
-function evaluate!(res::CDPSolveResult)
+function evaluate!(res::CDPSolveResult, fec::FunEvalCache)
     cdp, C, s_nodes = res.cdp, res.C, res.eval_nodes
-    res.V, res.X = s_wise_max(cdp, s_nodes, C)
+    res.V, res.X = s_wise_max(cdp, s_nodes, C, fec)
     res.resid = res.V - vec(funeval(C, cdp.interp.basis, s_nodes))
     return res
 end
+
+evaluate!(res::CDPSolveResult) =
+    evaluate!(res, FunEvalCache(res.cdp.interp.basis))
 
 function set_eval_nodes!(
         res::CDPSolveResult{Algo,1}, s_nodes_coord::NTuple{1,Vector{Float64}}
@@ -425,7 +430,7 @@ s_wise_max!(cdp::ContinuousDP, ss::AbstractArray{Float64},
     s_wise_max!(cdp, ss, C, Tv, X, FunEvalCache(cdp.interp.basis))
 
 """
-    s_wise_max(cdp, ss, C)
+    s_wise_max(cdp, ss, C[, fec])
 
 Find optimal value and action for each grid point.
 
@@ -434,6 +439,8 @@ Find optimal value and action for each grid point.
 - `cdp::ContinuousDP`: The dynamic program.
 - `ss::AbstractArray{Float64}`: Interpolation nodes.
 - `C::Vector{Float64}`: Basis coefficient vector for the value function.
+- `fec::FunEvalCache`: Workspace for point evaluation of the value function.
+  Constructed internally if not given.
 
 # Returns
 
@@ -441,11 +448,15 @@ Find optimal value and action for each grid point.
 - `X::Vector{Float64}`: Policy function vector.
 """
 function s_wise_max(cdp::ContinuousDP, ss::AbstractArray{Float64},
-                    C::Vector{Float64})
+                    C::Vector{Float64}, fec::FunEvalCache)
     n = size(ss, 1)
     Tv, X = Array{Float64}(undef, n), Array{Float64}(undef, n)
-    s_wise_max!(cdp, ss, C, Tv, X)
+    s_wise_max!(cdp, ss, C, Tv, X, fec)
 end
+
+s_wise_max(cdp::ContinuousDP, ss::AbstractArray{Float64},
+           C::Vector{Float64}) =
+    s_wise_max(cdp, ss, C, FunEvalCache(cdp.interp.basis))
 
 
 """
@@ -711,7 +722,7 @@ function solve(cdp::ContinuousDP{N}, method::Type{Algo}=PFI;
     ws = CDPWorkspace(cdp)
     ldiv!(res.C, cdp.interp.Phi_lu, v_init)
     _solve!(cdp, res, ws, verbose, print_skip; kwargs...)
-    evaluate!(res)
+    evaluate!(res, ws.fec)
     return res
 end
 
