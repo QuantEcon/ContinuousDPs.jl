@@ -603,12 +603,13 @@ function policy_iteration_operator!(cdp::ContinuousDP, C::Vector{Float64},
 end
 
 
-# Sup distance between two arrays, without allocating a temporary
+# Sup distance between two arrays, without allocating a temporary.
+# NaN entries propagate to the result (as with `maximum(abs, x - y)`), so
+# that a diverged iteration is never mistaken for a converged one.
 function _max_abs_diff(x, y)
     err = abs(zero(promote_type(eltype(x), eltype(y))))
     @inbounds for i in eachindex(x, y)
-        d = abs(x[i] - y[i])
-        d > err && (err = d)
+        err = max(err, abs(x[i] - y[i]))
     end
     return err
 end
