@@ -281,6 +281,41 @@ function (res::CDPSolveResult)(s_nodes::AbstractArray{Float64})
 end
 
 
+"""
+    CDPWorkspace{TF}
+
+Preallocated buffers used by the solution algorithms for a `ContinuousDP`.
+Construct with `CDPWorkspace(cdp)`.
+
+Not thread-safe: use one workspace per thread.
+
+# Fields
+
+- `fec::TF<:FunEvalCache`: Workspace for point evaluation of the value
+  function.
+- `Tv::Vector{Float64}`: Buffer for updated values at the interpolation
+  nodes.
+- `X::Vector{Float64}`: Buffer for updated actions at the interpolation
+  nodes.
+"""
+struct CDPWorkspace{TF<:FunEvalCache}
+    fec::TF
+    Tv::Vector{Float64}
+    X::Vector{Float64}
+end
+
+"""
+    CDPWorkspace(cdp::ContinuousDP)
+
+Construct a `CDPWorkspace` for `cdp`.
+"""
+CDPWorkspace(cdp::ContinuousDP) = CDPWorkspace(
+    FunEvalCache(cdp.interp.basis),
+    Vector{Float64}(undef, cdp.interp.length),
+    Vector{Float64}(undef, cdp.interp.length)
+)
+
+
 #= Methods =#
 
 # Non-copying access to the i-th point of a set of points stored as a
@@ -324,7 +359,7 @@ function _s_wise_max!(cdp::ContinuousDP, s, C, fec::FunEvalCache)
 end
 
 """
-    s_wise_max!(cdp, ss, C, Tv)
+    s_wise_max!(cdp, ss, C, Tv[, fec])
 
 Find optimal value for each grid point.
 
@@ -334,23 +369,29 @@ Find optimal value for each grid point.
 - `ss::AbstractArray{Float64}`: Interpolation nodes.
 - `C::Vector{Float64}`: Basis coefficient vector for the value function.
 - `Tv::Vector{Float64}`: A buffer array to hold the updated value function.
+- `fec::FunEvalCache`: Workspace for point evaluation of the value function.
+  Constructed internally if not given.
 
 # Returns
 
 - `Tv::Vector{Float64}`: Updated value function vector.
 """
 function s_wise_max!(cdp::ContinuousDP, ss::AbstractArray{Float64},
-                     C::Vector{Float64}, Tv::Vector{Float64})
+                     C::Vector{Float64}, Tv::Vector{Float64},
+                     fec::FunEvalCache)
     n = size(ss, 1)
-    fec = FunEvalCache(cdp.interp.basis)
     for i in 1:n
         Tv[i], _ = _s_wise_max!(cdp, _row(ss, i), C, fec)
     end
     return Tv
 end
 
+s_wise_max!(cdp::ContinuousDP, ss::AbstractArray{Float64},
+            C::Vector{Float64}, Tv::Vector{Float64}) =
+    s_wise_max!(cdp, ss, C, Tv, FunEvalCache(cdp.interp.basis))
+
 """
-    s_wise_max!(cdp, ss, C, Tv, X)
+    s_wise_max!(cdp, ss, C, Tv, X[, fec])
 
 Find optimal value and action for each grid point.
 
@@ -361,6 +402,8 @@ Find optimal value and action for each grid point.
 - `C::Vector{Float64}`: Basis coefficient vector for the value function.
 - `Tv::Vector{Float64}`: A buffer array to hold the updated value function.
 - `X::Vector{Float64}`: A buffer array to hold the updated policy function.
+- `fec::FunEvalCache`: Workspace for point evaluation of the value function.
+  Constructed internally if not given.
 
 # Returns
 
@@ -369,14 +412,17 @@ Find optimal value and action for each grid point.
 """
 function s_wise_max!(cdp::ContinuousDP, ss::AbstractArray{Float64},
                      C::Vector{Float64}, Tv::Vector{Float64},
-                     X::Vector{Float64})
+                     X::Vector{Float64}, fec::FunEvalCache)
     n = size(ss, 1)
-    fec = FunEvalCache(cdp.interp.basis)
     for i in 1:n
         Tv[i], X[i] = _s_wise_max!(cdp, _row(ss, i), C, fec)
     end
     return Tv, X
 end
+
+s_wise_max!(cdp::ContinuousDP, ss::AbstractArray{Float64},
+            C::Vector{Float64}, Tv::Vector{Float64}, X::Vector{Float64}) =
+    s_wise_max!(cdp, ss, C, Tv, X, FunEvalCache(cdp.interp.basis))
 
 """
     s_wise_max(cdp, ss, C)
@@ -404,20 +450,29 @@ end
 
 """
     bellman_operator!(cdp, C, Tv)
+    bellman_operator!(cdp, C, ws)
 
-Apply the Bellman operator and update the basis coefficients. Values are stored
-in `Tv`.
+Apply the Bellman operator and update the basis coefficients. Values are
+stored in `Tv` (or `ws.Tv`).
 
 # Arguments
 
 - `cdp::ContinuousDP`: The dynamic program.
 - `C::Vector{Float64}`: Basis coefficient vector for the value function.
 - `Tv::Vector{Float64}`: Vector to store values.
+- `ws::CDPWorkspace`: Workspace for the solution algorithms.
 
 # Returns
 
 - `C::Vector{Float64}`: Updated basis coefficient vector.
 """
+function bellman_operator!(cdp::ContinuousDP, C::Vector{Float64},
+                           ws::CDPWorkspace)
+    s_wise_max!(cdp, cdp.interp.S, C, ws.Tv, ws.fec)
+    ldiv!(C, cdp.interp.Phi_lu, ws.Tv)
+    return C
+end
+
 function bellman_operator!(cdp::ContinuousDP, C::Vector{Float64},
                            Tv::Vector{Float64})
     Tv = s_wise_max!(cdp, cdp.interp.S, C, Tv)
@@ -428,7 +483,7 @@ end
 
 """
     compute_greedy!(cdp, C, X)
-    compute_greedy!(cdp, ss, C, X)
+    compute_greedy!(cdp, ss, C, X[, fec])
 
 Compute the greedy policy for the given basis coefficients.
 
@@ -438,20 +493,26 @@ Compute the greedy policy for the given basis coefficients.
 - `ss::AbstractArray{Float64}`: Interpolation nodes.
 - `C::Vector{Float64}`: Basis coefficient vector for the value function.
 - `X::Vector{Float64}`: A buffer array to hold the updated policy function.
+- `fec::FunEvalCache`: Workspace for point evaluation of the value function.
+  Constructed internally if not given.
 
 # Returns
 
 - `X::Vector{Float64}`: Updated policy function vector.
 """
 function compute_greedy!(cdp::ContinuousDP, ss::AbstractArray{Float64},
-                         C::Vector{Float64}, X::Vector{Float64})
+                         C::Vector{Float64}, X::Vector{Float64},
+                         fec::FunEvalCache)
     n = size(ss, 1)
-    fec = FunEvalCache(cdp.interp.basis)
     for i in 1:n
         _, X[i] = _s_wise_max!(cdp, _row(ss, i), C, fec)
     end
     return X
 end
+
+compute_greedy!(cdp::ContinuousDP, ss::AbstractArray{Float64},
+                C::Vector{Float64}, X::Vector{Float64}) =
+    compute_greedy!(cdp, ss, C, X, FunEvalCache(cdp.interp.basis))
 
 compute_greedy!(cdp::ContinuousDP, C::Vector{Float64}, X::Vector{Float64}) =
     compute_greedy!(cdp, cdp.interp.S, C, X)
@@ -501,6 +562,7 @@ end
 
 """
     policy_iteration_operator!(cdp, C, X)
+    policy_iteration_operator!(cdp, C, ws)
 
 Perform one step of policy function iteration and update the basis coefficients.
 
@@ -509,11 +571,19 @@ Perform one step of policy function iteration and update the basis coefficients.
 - `cdp::ContinuousDP`: The dynamic program.
 - `C::Vector{Float64}`: Basis coefficient vector for the value function.
 - `X::Vector{Float64}`: A buffer array to hold the updated policy function.
+- `ws::CDPWorkspace`: Workspace for the solution algorithms.
 
 # Returns
 
 - `C::Vector{Float64}`: Updated basis coefficient vector.
 """
+function policy_iteration_operator!(cdp::ContinuousDP, C::Vector{Float64},
+                                    ws::CDPWorkspace)
+    compute_greedy!(cdp, cdp.interp.S, C, ws.X, ws.fec)
+    evaluate_policy!(cdp, ws.X, C)
+    return C
+end
+
 function policy_iteration_operator!(cdp::ContinuousDP, C::Vector{Float64},
                                     X::Vector{Float64})
     compute_greedy!(cdp, C, X)
@@ -521,6 +591,16 @@ function policy_iteration_operator!(cdp::ContinuousDP, C::Vector{Float64},
     return C
 end
 
+
+# Sup distance between two arrays, without allocating a temporary
+function _max_abs_diff(x, y)
+    err = zero(promote_type(eltype(x), eltype(y)))
+    @inbounds for i in eachindex(x, y)
+        d = abs(x[i] - y[i])
+        d > err && (err = d)
+    end
+    return err
+end
 
 """
     operator_iteration!(T, C, tol, max_iter; verbose=2, print_skip=50)
@@ -563,7 +643,7 @@ function operator_iteration!(T::Function, C::TC, tol::Float64,
     while true
         copyto!(C_old, C)
         C = T(C)::TC
-        err = maximum(abs, C - C_old)
+        err = _max_abs_diff(C, C_old)
         i += 1
         (err <= tol) && (converged = true)
 
@@ -628,8 +708,9 @@ function solve(cdp::ContinuousDP{N}, method::Type{Algo}=PFI;
                kwargs...) where {Algo<:DPAlgorithm,N}
     tol = Float64(tol)
     res = CDPSolveResult{Algo,N}(cdp, tol, max_iter)
+    ws = CDPWorkspace(cdp)
     ldiv!(res.C, cdp.interp.Phi_lu, v_init)
-    _solve!(cdp, res, verbose, print_skip; kwargs...)
+    _solve!(cdp, res, ws, verbose, print_skip; kwargs...)
     evaluate!(res)
     return res
 end
@@ -644,15 +725,13 @@ Policy function iteration algorithm for `solve`.
 PFI
 
 """
-    _solve!(cdp, res, verbose, print_skip)
+    _solve!(cdp, res, ws, verbose, print_skip)
 
 Implement policy iteration. See `solve` for further details.
 """
 function _solve!(cdp::ContinuousDP, res::CDPSolveResult{PFI},
-                 verbose, print_skip)
-    C = res.C
-    X = Array{Float64}(undef, cdp.interp.length)
-    operator!(C) = policy_iteration_operator!(cdp, C, X)
+                 ws::CDPWorkspace, verbose, print_skip)
+    operator!(C) = policy_iteration_operator!(cdp, C, ws)
     res.converged, res.num_iter =
         operator_iteration!(operator!, res.C, res.tol, res.max_iter,
                             verbose=verbose, print_skip=print_skip)
@@ -669,15 +748,13 @@ Value function iteration algorithm for `solve`.
 VFI
 
 """
-    _solve!(cdp, res, verbose, print_skip)
+    _solve!(cdp, res, ws, verbose, print_skip)
 
 Implement value iteration. See `solve` for further details.
 """
 function _solve!(cdp::ContinuousDP, res::CDPSolveResult{VFI},
-                 verbose, print_skip)
-    C = res.C
-    Tv = Array{Float64}(undef, cdp.interp.length)
-    operator!(C) = bellman_operator!(cdp, C, Tv)
+                 ws::CDPWorkspace, verbose, print_skip)
+    operator!(C) = bellman_operator!(cdp, C, ws)
     res.converged, res.num_iter =
         operator_iteration!(operator!, res.C, res.tol, res.max_iter,
                             verbose=verbose, print_skip=print_skip)
@@ -696,13 +773,13 @@ reference point and solve the resulting LQ problem.
 struct LQA <: DPAlgorithm end
 
 """
-    _solve!(cdp, res, verbose, print_skip; point)
+    _solve!(cdp, res, ws, verbose, print_skip; point)
 
 Implement linear quadratic approximation. See `solve` for further details.
 """
 function _solve!(cdp::ContinuousDP,
                  res::CDPSolveResult{LQA},
-                 verbose, print_skip;
+                 ws::CDPWorkspace, verbose, print_skip;
                  point::Tuple{ScalarOrArray, ScalarOrArray, ScalarOrArray})
     # Unpack point
     s_star, x_star, e_star = point

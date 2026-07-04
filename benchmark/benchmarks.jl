@@ -20,7 +20,7 @@ using BenchmarkTools
 using ContinuousDPs
 using ContinuousDPs:
     _s_wise_max!, bellman_operator!, compute_greedy!, evaluate_policy!,
-    FunEvalCache
+    FunEvalCache, CDPWorkspace
 using BasisMatrices: Basis, ChebParams, SplineParams
 using QuantEcon: qnwlogn, qnwnorm
 
@@ -127,13 +127,14 @@ for (label, cdp) in cases
     grp["s_wise_max_one_state"] =
         @benchmarkable _s_wise_max!($cdp, $s_mid, $C0, $fec)
 
-    # State loops over the kernel
+    # State loops over the kernel, using a preallocated workspace
+    ws = CDPWorkspace(cdp)
     grp["bellman_operator"] = @benchmarkable bellman_operator!(
-        $cdp, C, Tv
-    ) setup = (C = copy($C0); Tv = Vector{Float64}(undef, $n)) evals = 1
+        $cdp, C, $ws
+    ) setup = (C = copy($C0)) evals = 1
     grp["compute_greedy"] = @benchmarkable compute_greedy!(
-        $cdp, $C0, X
-    ) setup = (X = Vector{Float64}(undef, $n)) evals = 1
+        $cdp, $(cdp.interp.S), $C0, $(ws.X), $(ws.fec)
+    ) evals = 1
 
     # Policy evaluation: matrix assembly + LU solve (#75)
     grp["evaluate_policy"] = @benchmarkable evaluate_policy!(
