@@ -27,19 +27,29 @@ using QuantEcon: qnwlogn, qnwnorm
 #= Model definitions =#
 
 # 1-D stochastic optimal growth
-function growth_model_1d(basis)
+# The action bounds are tightened so that s' stays within the interpolation
+# domain [s_min, s_max] for all quadrature shock nodes: feasible actions can
+# otherwise map s' outside (even negative), where the fitted value function
+# is extrapolated -- catastrophically so for the Chebyshev basis, making VFI
+# diverge. Restricting the action set (rather than clamping s' inside `g`)
+# keeps the transition law smooth.
+function growth_model_1d(basis, s_min, s_max)
     alpha = 0.65
     f(s, x) = log(x)
     g(s, x, e) = e * s^alpha - x
     shocks, weights = qnwlogn(9, 0.0, 0.01)
-    x_lb(s) = 1e-8
-    x_ub(s) = s
+    e_min, e_max = extrema(shocks)
+    x_lb(s) = max(1e-8, e_max * s^alpha - s_max)
+    x_ub(s) = min(s, e_min * s^alpha - s_min)
     return ContinuousDP(f, g, 0.95, shocks, weights, x_lb, x_ub, basis)
 end
 
 # 2-D stochastic optimal growth with leisure (Santos, 1999, Sec. 7.3;
-# same model as in test/test_cdp_multidim.jl)
-function growth_model_2d(basis)
+# same model as in test/test_cdp_multidim.jl). The capital stock is kept
+# within the interpolation domain [k_min, k_max] by clamping in `g`: unlike
+# in the 1-D model, the action bound ensuring k' <= k_max has no closed
+# form (k' is transcendental in x).
+function growth_model_2d(basis, k_min, k_max)
     beta = 0.95
     lambda = 1 / 3
     A = 10.0
@@ -68,7 +78,7 @@ function growth_model_2d(basis)
     function g(s, x, e)
         k, logz = s
         z = exp(logz)
-        kp = kprime_from_x(k, z, x)
+        kp = clamp(kprime_from_x(k, z, x), k_min, k_max)
         logzp = rho * logz + e
         return (kp, logzp)
     end
@@ -87,12 +97,14 @@ logz_min, logz_max = -0.32, 0.32
 nk, nlogz = 43, 3
 
 cases = [
-    ("1d_cheb", growth_model_1d(Basis(ChebParams(50, s_min_1d, s_max_1d)))),
+    ("1d_cheb", growth_model_1d(
+        Basis(ChebParams(50, s_min_1d, s_max_1d)), s_min_1d, s_max_1d)),
     ("1d_spline", growth_model_1d(
-        Basis(SplineParams(99, s_min_1d, s_max_1d, 3)))),
+        Basis(SplineParams(99, s_min_1d, s_max_1d, 3)), s_min_1d, s_max_1d)),
     ("2d_spline", growth_model_2d(
         Basis(SplineParams(nk - 1, k_min, k_max, 2),
-              SplineParams(nlogz - 1, logz_min, logz_max, 2)))),
+              SplineParams(nlogz - 1, logz_min, logz_max, 2)),
+        k_min, k_max)),
 ]
 
 eval_grids = Dict(
