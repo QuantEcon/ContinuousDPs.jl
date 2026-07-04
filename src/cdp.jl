@@ -594,7 +594,7 @@ end
 
 # Sup distance between two arrays, without allocating a temporary
 function _max_abs_diff(x, y)
-    err = zero(promote_type(eltype(x), eltype(y)))
+    err = abs(zero(promote_type(eltype(x), eltype(y))))
     @inbounds for i in eachindex(x, y)
         d = abs(x[i] - y[i])
         d > err && (err = d)
