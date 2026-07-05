@@ -16,6 +16,7 @@ include("lq_approx.jl")
 
 export
     ContinuousDP, solve, VFI, PFI, LQA,
+    ActionSpace, ContinuousActions, DiscreteActions,
     set_eval_nodes!, simulate, simulate!, approx_lq
 
 end # module

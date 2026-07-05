@@ -117,6 +117,12 @@ ALWAYS run these validation steps after making changes:
 - CONTRACT: these kernels must reproduce `BasisMatrices.evalbase`/`funeval` semantics exactly, including behavior outside the interpolation domain; `test/test_point_eval.jl` enforces agreement at machine precision. Any change here requires those tests.
 - The file is deliberately self-contained (no DP-specific types): it is planned to move upstream to BasisMatrices.jl (issue #94). Do not add ContinuousDPs types to it, and do not make other files depend on its imports (import what you use explicitly).
 
+### Action spaces (`src/cdp.jl`)
+- `ContinuousDP` stores an `actions::ActionSpace`: `ContinuousActions(x_lb, x_ub)` (one-dimensional box; the legacy positional `x_lb, x_ub` constructor arguments wrap into this) or `DiscreteActions(vals)` (finite set of action values of any homogeneous type).
+- Discrete actions follow the QuantEcon `MarkovChain`/`state_values` convention: solvers work with indices internally (`ws.X_ind`, `res.X_ind`); `res.X` exposes the corresponding values. The inner problem is solved by exact enumeration; `inner_solver` is ignored. Infeasible state-action pairs are expressed by `f` returning `-Inf`.
+- `simulate` recomputes the greedy action exactly at each visited state for discrete actions (a discrete policy must not be interpolated); continuous actions keep policy interpolation.
+- LQA requires a continuous action space (`ArgumentError` otherwise).
+
 ### Solver workspace and inner solvers (`src/cdp.jl`)
 - `CDPWorkspace(cdp; inner_solver=:foc)` holds all preallocated buffers and evaluation caches; it is created once per `solve`. Workspaces and caches are NOT thread-safe (one per thread).
 - The inner maximization over actions uses the first-order condition by default (`inner_solver=:foc`; safeguarded root-finding, warm-started via `ws.X`, exact interpolant gradients, finite differences of user `f`/`g`), with automatic fallback to Brent per basis (piecewise linear bases), per state (non-finite values, exceptions), and per call (`inner_solver=:brent`).

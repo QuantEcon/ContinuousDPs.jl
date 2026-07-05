@@ -20,7 +20,7 @@ using BenchmarkTools
 using ContinuousDPs
 using ContinuousDPs:
     _s_wise_max!, bellman_operator!, compute_greedy!, evaluate_policy!,
-    FunEvalCache, CDPWorkspace
+    FunEvalCache, CDPWorkspace, DiscreteActions
 using BasisMatrices: Basis, ChebParams, SplineParams
 using QuantEcon: qnwlogn, qnwnorm
 
@@ -157,6 +157,33 @@ for (label, cdp) in cases
     grid = eval_grids[label]
     grp["set_eval_nodes"] =
         @benchmarkable set_eval_nodes!($res, $grid...) evals = 1
+end
+
+#= Discrete-action case =#
+
+# Discrete-action variant of the 1-D growth model (201 actions)
+function growth_model_1d_discrete(basis, s_min, s_max, K)
+    alpha = 0.65
+    f(s, x) = x > 0 ? log(x) : -Inf
+    g(s, x, e) = clamp(e * s^alpha - x, s_min, s_max)
+    shocks, weights = qnwlogn(9, 0.0, 0.01)
+    actions = DiscreteActions(collect(range(1e-3, s_max^alpha, length=K)))
+    return ContinuousDP(f, g, 0.95, shocks, weights, actions, basis)
+end
+
+let
+    cdp = growth_model_1d_discrete(
+        Basis(ChebParams(50, s_min_1d, s_max_1d)), s_min_1d, s_max_1d, 201)
+    grp = SUITE["1d_cheb_discrete"] = BenchmarkGroup()
+    grp["solve_PFI"] = @benchmarkable solve($cdp, PFI; verbose=0)
+    grp["solve_VFI_50iter"] =
+        @benchmarkable solve($cdp, VFI; max_iter=50, verbose=0)
+    res = solve(cdp, PFI; verbose=0)
+    C0 = copy(res.C)
+    ws = CDPWorkspace(cdp)
+    grp["bellman_operator"] = @benchmarkable bellman_operator!(
+        $cdp, C, $ws
+    ) setup = (C = copy($C0)) evals = 1
 end
 
 #= Standalone execution =#
