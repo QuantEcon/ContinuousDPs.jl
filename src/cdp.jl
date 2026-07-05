@@ -402,13 +402,16 @@ end
 const _FOC_RELSTEP = cbrt(eps(Float64))
 
 """
-    _objective_and_deriv(cdp, s, C, fec, dfecs, x)
+    _objective_and_deriv(cdp, s, C, fec, dfecs, x, x_lb, x_ub)
 
 Evaluate the inner objective `H(x) = f(s, x) + beta * E[V^(g(s, x, e))]` and
 its derivative `H'(x) = f_x + beta * E[grad V^(g(s, x, e)) . g_x]` at the
 action `x`. The gradient of the fitted value function is evaluated exactly
 via `dfecs` (whose coefficients must be set with `set_coefs!` beforehand),
-while `f_x` and `g_x` are computed by central finite differences.
+while `f_x` and `g_x` are computed by central finite differences with the
+step shrunk so that `x ± h` stay within `[x_lb, x_ub]` (so that `f` and `g`
+are never called at infeasible actions); if no adequate step exists,
+`(NaN, NaN)` is returned to trigger the Brent fallback.
 
 # Returns
 
@@ -416,8 +419,10 @@ while `f_x` and `g_x` are computed by central finite differences.
   non-finite, in which case the caller should fall back to Brent).
 """
 function _objective_and_deriv(cdp::ContinuousDP{N}, s, C, fec::FunEvalCache,
-                              dfecs, x::Float64) where N
-    h = _FOC_RELSTEP * max(abs(x), 1.0)
+                              dfecs, x::Float64, x_lb::Float64,
+                              x_ub::Float64) where N
+    h = min(_FOC_RELSTEP * max(abs(x), 1.0), x - x_lb, x_ub - x)
+    h > eps() * max(abs(x), 1.0) || return NaN, NaN
     f0 = cdp.f(s, x)
     fp = (cdp.f(s, x + h) - cdp.f(s, x - h)) / (2h)
     cont = 0.0
@@ -440,8 +445,8 @@ end
 
 # grad V^(s_next) . g_x, with g_x by central differences, unrolled over the
 # state dimensions
-@inline function _grad_dot_gx(dfecs::NTuple{N,Any}, s_next, s_up, s_dn,
-                              h::Float64) where N
+@inline function _grad_dot_gx(dfecs::NTuple{N,DerivFunEvalCache}, s_next,
+                              s_up, s_dn, h::Float64) where N
     parts = ntuple(
         d -> funeval_point!(dfecs[d], s_next) *
              ((_coord(s_up, d) - _coord(s_dn, d)) / (2h)),
@@ -474,7 +479,7 @@ function _s_wise_max_foc!(cdp::ContinuousDP, s, C, fec::FunEvalCache, dfecs,
     lo, hi = lb + off, ub - off
 
     x0 = isfinite(x_prev) ? clamp(x_prev, lo, hi) : 0.5 * (lo + hi)
-    H0, Hp0 = _objective_and_deriv(cdp, s, C, fec, dfecs, x0)
+    H0, Hp0 = _objective_and_deriv(cdp, s, C, fec, dfecs, x0, lb, ub)
     (isfinite(H0) && isfinite(Hp0)) ||
         return _s_wise_max!(cdp, s, C, fec)
 
@@ -486,7 +491,7 @@ function _s_wise_max_foc!(cdp::ContinuousDP, s, C, fec::FunEvalCache, dfecs,
         step = 0.02 * width
         while true
             xt = min(a + step, hi)
-            Ht, Hpt = _objective_and_deriv(cdp, s, C, fec, dfecs, xt)
+            Ht, Hpt = _objective_and_deriv(cdp, s, C, fec, dfecs, xt, lb, ub)
             (isfinite(Ht) && isfinite(Hpt)) ||
                 return _s_wise_max!(cdp, s, C, fec)
             if Hpt <= 0
@@ -501,7 +506,7 @@ function _s_wise_max_foc!(cdp::ContinuousDP, s, C, fec::FunEvalCache, dfecs,
         step = 0.02 * width
         while true
             xt = max(b - step, lo)
-            Ht, Hpt = _objective_and_deriv(cdp, s, C, fec, dfecs, xt)
+            Ht, Hpt = _objective_and_deriv(cdp, s, C, fec, dfecs, xt, lb, ub)
             (isfinite(Ht) && isfinite(Hpt)) ||
                 return _s_wise_max!(cdp, s, C, fec)
             if Hpt >= 0
@@ -527,7 +532,7 @@ function _s_wise_max_foc!(cdp::ContinuousDP, s, C, fec::FunEvalCache, dfecs,
         if !(a < xm < b)
             xm = 0.5 * (a + b)
         end
-        Hm, Hpm = _objective_and_deriv(cdp, s, C, fec, dfecs, xm)
+        Hm, Hpm = _objective_and_deriv(cdp, s, C, fec, dfecs, xm, lb, ub)
         (isfinite(Hm) && isfinite(Hpm)) ||
             return _s_wise_max!(cdp, s, C, fec)
         if Hpm > 0

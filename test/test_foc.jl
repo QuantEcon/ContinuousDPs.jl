@@ -1,4 +1,4 @@
-using ContinuousDPs: CDPWorkspace
+using ContinuousDPs: CDPWorkspace, set_coefs!, _s_wise_max_foc!
 using QuantEcon: qnwlogn
 
 @testset "FOC inner solver" begin
@@ -47,6 +47,26 @@ using QuantEcon: qnwlogn
         # At a corner, H' != 0, so the inward evaluation offset (~sqrt(eps))
         # induces a value bias of order |H'| * offset / (1 - beta) ~ 1e-6
         @test all(isapprox.(res.V, -1.0 / (1 - beta); rtol=1e-6))
+    end
+
+    @testset "corner solution with f finite but wrong outside the bounds" begin
+        # f is finite everywhere but drops sharply just outside the feasible
+        # set [0, 1]: the finite-difference step for f_x must not cross the
+        # bound, or the spurious out-of-bounds values would push the
+        # computed maximizer ~1e-5 inside the corner. Probe the FOC path
+        # directly (the Brent-based `evaluate!` would mask it in `res.X`).
+        beta = 0.95
+        f(s, x) = 0.0 <= x <= 1.0 ? -(x - 2.0)^2 : -100.0
+        g(s, x, e) = 0.5 * s + 0.25
+        cdp = ContinuousDP(f, g, beta, [1.0], [1.0], s -> 0.0, s -> 1.0,
+                           Basis(ChebParams(10, 0.1, 2.0)))
+        res = solve(cdp, PFI, verbose=0, inner_solver=:foc)
+        @test res.converged
+        ws = CDPWorkspace(cdp)
+        foreach(dfec -> set_coefs!(dfec, res.C), ws.dfecs)
+        v, x = _s_wise_max_foc!(cdp, cdp.interp.S[1], res.C, ws.fec,
+                                ws.dfecs, NaN)
+        @test x ≈ 1.0 atol=1e-6
     end
 
     @testset "automatic Brent for non-differentiable bases" begin
