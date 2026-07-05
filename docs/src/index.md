@@ -29,7 +29,8 @@ V(s)
 ```
 where
 - ``s \in \mathbb{R}^N`` is the **state** (continuous, possibly multi-dimensional),
-- ``x \in \mathbb{R}`` is the **action** (continuous, 1-dimensional),
+- ``x \in \mathbb{R}`` is the **action** (continuous, 1-dimensional;
+    multi-dimensional and discrete actions are also supported --- see below),
 - ``f(s, x)`` is the **reward** function,
 - ``g(s, x, \varepsilon)`` is the **state transition** function,
 - ``\varepsilon`` is a **random shock**,
@@ -63,8 +64,19 @@ where
   [`BasisMatrices.jl`](https://github.com/QuantEcon/BasisMatrices.jl) that
   contains the interpolation basis information.
 
+Instead of `x_lb` and `x_ub`, an action space object can be passed:
+`ContinuousActions{M}(x_lb, x_ub)` for an `M`-dimensional box of continuous
+actions (with the bound functions returning length-`M` tuples or
+vectors; policy
+functions are then stored as `n x M` matrices), or `DiscreteActions(vals)`
+for a finite set of actions of arbitrary type (solved by exact enumeration,
+with `res.X_ind` holding the indices of the optimal actions into `vals`). `DiscreteActions(vals)` represents a fixed finite action set; for
+state-dependent infeasibility, return `-Inf` from `f(s, x)`.
+
 Then call `solve(cdp)` to obtain the value function, policy function, and
-residuals.
+residuals. The inner maximization over continuous actions is solved via the
+first-order condition by default; pass `inner_solver=:brent` to `solve` for
+a derivative-free method.
 
 ## Example usage
 
