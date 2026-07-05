@@ -109,6 +109,7 @@ ALWAYS run these validation steps after making changes:
 - Always run tests in `test/test_cdp.jl`, `test/test_cdp_multidim.jl`, `test/test_foc.jl`, and `test/test_evaluate_policy.jl` when modifying CDP functionality
 - Always run tests in `test/test_lq_approx.jl` when modifying LQ approximation
 - Update `benchmark/benchmarks.jl` when internal signatures used there change
+- `README.md`, `docs/src/index.md`, and `examples/cdp_ex_optgrowth_jl.ipynb` share the problem-formulation and interface description and are kept synchronized content-wise: when editing one of them, update the other two to a contextually appropriate extent (they need not be verbatim copies; judge the extent by what changed)
 
 ## Architecture Notes (performance-critical internals)
 
