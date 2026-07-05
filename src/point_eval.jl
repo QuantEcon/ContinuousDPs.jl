@@ -22,11 +22,20 @@ The kernels work in `Float64` internally: evaluation points are accepted as
 `Real` and converted to `Float64`, while basis coefficients are required to
 be `Float64` (so that unintended use with other numeric types, e.g.
 `BigFloat` or AD dual numbers, fails at dispatch instead of silently losing
-precision). Only the basis functions themselves are evaluated (derivative
-order 0).
+precision).
+
+Derivatives of the interpolant are supported through coefficient
+differentiation ([`DerivFunEvalCache`](@ref)): for each basis family, the
+derivative of an interpolant is itself an interpolant on the differentiated
+parameters (`derivative_op` from BasisMatrices.jl provides both the sparse
+coefficient operator and the differentiated parameters), so a partial
+derivative is evaluated with the same order-0 kernels after a single sparse
+transformation of the coefficient vector.
 =#
 using BasisMatrices: BasisParams, ChebParams, SplineParams, LinParams, Basis,
-                     evalbase
+                     evalbase, derivative_op
+using LinearAlgebra: I, mul!
+using SparseArrays: SparseMatrixCSC, sparse
 
 #= Per-dimension evaluation caches =#
 
@@ -295,3 +304,86 @@ function funeval_point!(fec::FunEvalCache{N}, C::AbstractVector{Float64},
     end
     return acc
 end
+
+
+#= Point evaluation of derivatives =#
+
+# Differentiated parameters and the composed 1-D coefficient operator for a
+# derivative of order `o` (identity for o == 0)
+function _deriv_params_op(p::BasisParams, o::Int)
+    o == 0 && return p, sparse(1.0I, length(p), length(p))
+    D, p_new = derivative_op(p, [0.0], o)
+    return p_new, SparseMatrixCSC{Float64,Int}(D[o])
+end
+
+function _deriv_params_op(p::SplineParams, o::Int)
+    o == 0 && return p, sparse(1.0I, length(p), length(p))
+    # `evalbase` requires the derivative order to be less than the spline
+    # degree; mirror that restriction here
+    o < p.k || throw(ArgumentError(
+        "derivative order ($o) must be less than the spline degree ($(p.k))"))
+    D, p_new = derivative_op(p, [0.0], o)
+    return p_new, SparseMatrixCSC{Float64,Int}(D[o])
+end
+
+"""
+    DerivFunEvalCache{N,TF}
+
+Workspace for evaluating a partial derivative of an interpolant on an
+`N`-dimensional tensor-product `Basis` at single points without allocations.
+
+The derivative of the interpolant is represented as an interpolant on the
+differentiated basis parameters, whose coefficients are a (sparse) linear
+transformation of the original ones. Set the coefficients with
+[`set_coefs!`](@ref) (once for each new coefficient vector), then evaluate
+with `funeval_point!(dfec, x)` at any number of points.
+
+Not thread-safe: use one cache per thread.
+"""
+struct DerivFunEvalCache{N,TF<:FunEvalCache{N}}
+    order::NTuple{N,Int}
+    fec::TF
+    D::SparseMatrixCSC{Float64,Int}
+    C_deriv::Vector{Float64}
+end
+
+"""
+    DerivFunEvalCache(basis::Basis{N}, order::NTuple{N,Int})
+
+Construct a point-evaluation workspace for the partial derivative of orders
+`order` (one nonnegative integer per dimension, `0` meaning no
+differentiation) of interpolants on `basis`. For `SplineParams`, the order
+must be less than the spline degree, as in `evalbase`.
+"""
+function DerivFunEvalCache(basis::Basis{N}, order::NTuple{N,Int}) where N
+    all(o -> o >= 0, order) ||
+        throw(ArgumentError("derivative orders must be nonnegative"))
+    params_ops = ntuple(d -> _deriv_params_op(basis.params[d], order[d]),
+                        Val(N))
+    fec = FunEvalCache(Basis(map(first, params_ops)))
+    D = reduce(kron, (params_ops[d][2] for d in N:-1:1))
+    C_deriv = Vector{Float64}(undef, size(D, 1))
+    return DerivFunEvalCache(order, fec, D, C_deriv)
+end
+
+"""
+    set_coefs!(dfec::DerivFunEvalCache, C)
+
+Set the basis coefficients of the interpolant to differentiate: transform
+`C` into the coefficients of the derivative interpolant, stored in `dfec`.
+Call once whenever `C` changes, before evaluating with `funeval_point!`.
+"""
+function set_coefs!(dfec::DerivFunEvalCache, C::AbstractVector{Float64})
+    mul!(dfec.C_deriv, dfec.D, C)
+    return dfec
+end
+
+"""
+    funeval_point!(dfec::DerivFunEvalCache, x) -> Float64
+
+Evaluate the partial derivative of the interpolant whose coefficients were
+set by [`set_coefs!`](@ref) at the single point `x`. Equivalent to `funeval`
+with the corresponding derivative `order`, but non-allocating.
+"""
+funeval_point!(dfec::DerivFunEvalCache, x) =
+    funeval_point!(dfec.fec, dfec.C_deriv, x)
