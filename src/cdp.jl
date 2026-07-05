@@ -12,6 +12,7 @@ References
 =#
 using BasisMatrices
 import Optim
+using NLSolversBase: only_fg!
 using FiniteDiff
 using SparseArrays: SparseMatrixCSC, sparse
 import QuantEcon.ScalarOrArray
@@ -86,8 +87,14 @@ abstract type ActionSpace end
     ContinuousActions{M,Tlb,Tub}
 
 Continuous action space: an `M`-dimensional box `[x_lb(s), x_ub(s)]` that may
-depend on the state. Currently only `M == 1` is supported (multi-dimensional
-actions are tracked in issue #88).
+depend on the state. Construct with `ContinuousActions(x_lb, x_ub)` for
+`M == 1` (with `x_lb(s)`, `x_ub(s)` returning scalars) or
+`ContinuousActions{M}(x_lb, x_ub)` for `M > 1` (with the bound functions
+returning length-`M` tuples or vectors).
+
+For `M > 1`, actions are passed to the reward and transition functions as
+length-`M` collections indexable by `x[1], ..., x[M]` (tuples or views), and
+policy functions are stored as `n x M` matrices (one row per state node).
 
 # Fields
 
@@ -99,15 +106,17 @@ struct ContinuousActions{M,Tlb,Tub} <: ActionSpace
     x_ub::Tub
 
     function ContinuousActions{M,Tlb,Tub}(x_lb, x_ub) where {M,Tlb,Tub}
-        M == 1 || throw(ArgumentError(
-            "only one-dimensional continuous action spaces are supported " *
-            "for now (multi-dimensional actions are tracked in issue #88)"))
+        (M isa Int && M >= 1) || throw(ArgumentError(
+            "the action dimension M must be a positive integer"))
         return new{M,Tlb,Tub}(x_lb, x_ub)
     end
 end
 
 ContinuousActions(x_lb, x_ub) =
     ContinuousActions{1,typeof(x_lb),typeof(x_ub)}(x_lb, x_ub)
+
+ContinuousActions{M}(x_lb, x_ub) where {M} =
+    ContinuousActions{M,typeof(x_lb),typeof(x_ub)}(x_lb, x_ub)
 
 """
     DiscreteActions{TA}
@@ -138,8 +147,28 @@ end
 Base.length(a::DiscreteActions) = length(a.vals)
 
 # Element type of the policy-function container for each action space
-_policy_eltype(::ContinuousActions{1}) = Float64
+_policy_eltype(::ContinuousActions) = Float64
 _policy_eltype(::DiscreteActions{TA}) where TA = TA
+
+# Policy-function containers: a length-n vector, except an n x M matrix for
+# multi-dimensional continuous actions (rows are action points, matching the
+# convention for state nodes S). Entries are initialized to NaN for
+# continuous actions (NaN marks "no warm start").
+_empty_policy(::ContinuousActions{1}) = Float64[]
+_empty_policy(::ContinuousActions{M}) where M = Matrix{Float64}(undef, 0, M)
+_empty_policy(::DiscreteActions{TA}) where TA = TA[]
+
+_policy_buffer(::ContinuousActions{1}, n::Int) = fill(NaN, n)
+_policy_buffer(::ContinuousActions{M}, n::Int) where M = fill(NaN, n, M)
+_policy_buffer(::DiscreteActions{TA}, n::Int) where TA =
+    Vector{TA}(undef, n)
+
+_policy_size_ok(a::ContinuousActions{1}, X, n) = length(X) == n
+_policy_size_ok(a::ContinuousActions{M}, X, n) where M = size(X) == (n, M)
+_policy_size_ok(a::DiscreteActions, X, n) = length(X) == n
+
+# Action dimension as a compile-time constant
+_action_dim(::ContinuousActions{M}) where M = M
 
 
 """
@@ -256,14 +285,14 @@ algorithm `Algo`.
 - `eval_nodes_coord::NTuple{N,Vector{Float64}}`: Coordinate vectors of the
   evaluation nodes along each dimension. Defaults to `cdp.interp.Scoord`.
 - `V::Vector{Float64}`: Value function evaluated at `eval_nodes`.
-- `X::TX<:AbstractVector`: Policy function (action values) evaluated at
-  `eval_nodes`.
+- `X::TX<:AbstractVecOrMat`: Policy function (action values) evaluated at
+  `eval_nodes` (an `n x M` matrix for `M`-dimensional continuous actions).
 - `X_ind::Vector{Int}`: For a discrete action space, the indices into
   `cdp.actions.vals` corresponding to `X`; empty otherwise.
 - `resid::Vector{Float64}`: Approximation residuals at `eval_nodes`.
 """
 mutable struct CDPSolveResult{Algo<:DPAlgorithm,N,TCDP<:ContinuousDP{N},
-                              TE<:VecOrMat,TX<:AbstractVector}
+                              TE<:VecOrMat,TX<:AbstractVecOrMat}
     cdp::TCDP
     tol::Float64
     max_iter::Int
@@ -286,7 +315,7 @@ mutable struct CDPSolveResult{Algo<:DPAlgorithm,N,TCDP<:ContinuousDP{N},
         eval_nodes = cdp.interp.S
         eval_nodes_coord = cdp.interp.Scoord
         V = Float64[]
-        X = _policy_eltype(cdp.actions)[]
+        X = _empty_policy(cdp.actions)
         X_ind = Int[]
         resid = Float64[]
         res = new{Algo,N,TCDP,typeof(eval_nodes),typeof(X)}(
@@ -298,6 +327,16 @@ mutable struct CDPSolveResult{Algo<:DPAlgorithm,N,TCDP<:ContinuousDP{N},
 end
 
 Base.ndims(::ContinuousDP{N}) where {N} = N
+
+# Derivative caches for gradient-based evaluation sweeps, or nothing when
+# the basis does not support them (then the derivative-free path is used)
+function _eval_dfecs(cdp::ContinuousDP{N}) where N
+    basis = cdp.interp.basis
+    all(d -> _foc_suitable(basis.params[d]), 1:N) || return nothing
+    return ntuple(d -> DerivFunEvalCache(
+               basis, ntuple(i -> Int(i == d), Val(N))), Val(N))
+end
+
 Base.ndims(::CDPSolveResult{Algo,N}) where {Algo,N} = N
 
 """
@@ -320,7 +359,7 @@ function evaluate!(res::CDPSolveResult, fec::FunEvalCache)
     a = cdp.actions
     n = size(s_nodes, 1)
     length(res.V) == n || (res.V = Vector{Float64}(undef, n))
-    length(res.X) == n || (res.X = Vector{_policy_eltype(a)}(undef, n))
+    _policy_size_ok(a, res.X, n) || (res.X = _policy_buffer(a, n))
     length(res.resid) == n || (res.resid = Vector{Float64}(undef, n))
     if a isa DiscreteActions
         length(res.X_ind) == n || (res.X_ind = Vector{Int}(undef, n))
@@ -328,6 +367,14 @@ function evaluate!(res::CDPSolveResult, fec::FunEvalCache)
             res.V[i], res.X_ind[i] =
                 _s_wise_max_discrete!(cdp, _row(s_nodes, i), C, fec)
             res.X[i] = a.vals[res.X_ind[i]]
+        end
+    elseif a isa ContinuousActions && _action_dim(a) > 1
+        dfecs = _eval_dfecs(cdp)
+        dfecs === nothing || foreach(dfec -> set_coefs!(dfec, C), dfecs)
+        for i in 1:n
+            res.V[i] = _s_wise_max_multi!(cdp, _row(s_nodes, i), C, fec,
+                                          dfecs, view(res.X, i, :),
+                                          dfecs !== nothing)
         end
     else
         s_wise_max!(cdp, s_nodes, C, res.V, res.X, fec)
@@ -406,6 +453,16 @@ function (res::CDPSolveResult)(s_nodes::AbstractArray{Float64})
             V[i], k = _s_wise_max_discrete!(cdp, _row(s_nodes, i), C, fec)
             X[i] = a.vals[k]
         end
+    elseif a isa ContinuousActions && _action_dim(a) > 1
+        V = Vector{Float64}(undef, n)
+        X = _policy_buffer(a, n)
+        dfecs = _eval_dfecs(cdp)
+        dfecs === nothing || foreach(dfec -> set_coefs!(dfec, C), dfecs)
+        for i in 1:n
+            V[i] = _s_wise_max_multi!(cdp, _row(s_nodes, i), C, fec,
+                                      dfecs, view(X, i, :),
+                                      dfecs !== nothing)
+        end
     else
         V, X = s_wise_max(cdp, s_nodes, C, fec)
     end
@@ -434,9 +491,10 @@ Not thread-safe: use one workspace per thread.
   support the first-order-condition solver (see below).
 - `Tv::Vector{Float64}`: Buffer for updated values at the interpolation
   nodes.
-- `X::Vector{Float64}`: Buffer for updated actions at the interpolation
-  nodes for a continuous action space (initialized to `NaN`; also serves as
-  the warm start for the inner maximization in the next sweep).
+- `X::TX<:VecOrMat{Float64}`: Buffer for updated actions at the
+  interpolation nodes for a continuous action space, an `n x M` matrix for
+  `M`-dimensional actions (initialized to `NaN`; also serves as the warm
+  start for the inner maximization in the next sweep).
 - `X_ind::Vector{Int}`: Buffer for updated action indices at the
   interpolation nodes for a discrete action space; empty otherwise.
 - `inner_solver::Symbol`: `:foc` to solve the inner maximization via its
@@ -444,11 +502,11 @@ Not thread-safe: use one workspace per thread.
   always use derivative-free Brent maximization. Has no effect for a
   discrete action space (solved by enumeration), but is still validated.
 """
-struct CDPWorkspace{TF<:FunEvalCache,TD}
+struct CDPWorkspace{TF<:FunEvalCache,TD,TX<:VecOrMat{Float64}}
     fec::TF
     dfecs::TD
     Tv::Vector{Float64}
-    X::Vector{Float64}
+    X::TX
     X_ind::Vector{Int}
     inner_solver::Symbol
 end
@@ -484,7 +542,7 @@ function CDPWorkspace(cdp::ContinuousDP{N}; inner_solver::Symbol=:foc) where N
         FunEvalCache(basis),
         dfecs,
         Vector{Float64}(undef, n),
-        discrete ? Float64[] : fill(NaN, n),
+        discrete ? Float64[] : _policy_buffer(cdp.actions, n),
         discrete ? Vector{Int}(undef, n) : Int[],
         inner_solver
     )
@@ -774,6 +832,209 @@ end
 
 _use_foc(ws::CDPWorkspace) = ws.inner_solver == :foc && ws.dfecs !== nothing
 
+
+#= Multi-dimensional continuous inner solver =#
+
+# Objective H(x) (and optionally its gradient) for an M-dimensional action
+# given as an Optim vector `x`. The gradient combines the exact gradient of
+# the fitted value function (via `dfecs`) with bound-aware central finite
+# differences of the user's f and g in each action dimension; any non-finite
+# intermediate makes the result non-finite, which callers treat as a signal
+# to fall back. Writes -H and -grad H (Optim minimizes).
+function _negH_multi!(G, cdp::ContinuousDP{N}, s, C, fec::FunEvalCache,
+                      dfecs, x::Vector{Float64}, lb::Vector{Float64},
+                      ub::Vector{Float64}, ::Val{M}) where {N,M}
+    # Fminbox inner iterates can momentarily leave the box (the barrier
+    # penalizes but does not constrain evaluation points); clamp so that
+    # the user's f and g are only ever called at feasible actions
+    xt = ntuple(d -> clamp(x[d], lb[d], ub[d]), Val(M))
+    flow = cdp.f(s, xt)
+    if !isfinite(flow)
+        G === nothing || fill!(G, NaN)
+        return -flow  # +Inf (or NaN): Optim sees an infeasible point
+    end
+
+    if G === nothing
+        cont = 0.0
+        for j in eachindex(cdp.weights)
+            e = _row(cdp.shocks, j)
+            cont += cdp.weights[j] * funeval_point!(fec, C, cdp.g(s, xt, e))
+        end
+        return -(flow + cdp.discount * cont)
+    end
+
+    # Bound-aware finite-difference steps per action dimension (relative
+    # to the clamped coordinates)
+    h = ntuple(Val(M)) do d
+        hd = min(_FOC_RELSTEP * max(abs(xt[d]), 1.0), xt[d] - lb[d],
+                 ub[d] - xt[d])
+        hd > eps() * max(abs(xt[d]), 1.0) ? hd : NaN
+    end
+    if !all(isfinite, h)
+        fill!(G, NaN)
+        return NaN
+    end
+
+    # f_x by central differences
+    for d in 1:M
+        fu = cdp.f(s, ntuple(k -> k == d ? xt[k] + h[d] : xt[k], Val(M)))
+        fl = cdp.f(s, ntuple(k -> k == d ? xt[k] - h[d] : xt[k], Val(M)))
+        G[d] = (fu - fl) / (2 * h[d])
+    end
+
+    cont = 0.0
+    for j in eachindex(cdp.weights)
+        e = _row(cdp.shocks, j)
+        w = cdp.weights[j]
+        s_next = cdp.g(s, xt, e)
+        cont += w * funeval_point!(fec, C, s_next)
+        # grad V^(s_next), evaluated once per shock
+        gradv = ntuple(nd -> funeval_point!(dfecs[nd], s_next), Val(N))
+        for d in 1:M
+            s_up = cdp.g(s, ntuple(k -> k == d ? xt[k] + h[d] : xt[k],
+                                   Val(M)), e)
+            s_dn = cdp.g(s, ntuple(k -> k == d ? xt[k] - h[d] : xt[k],
+                                   Val(M)), e)
+            dv = 0.0
+            for nd in 1:N
+                dv += gradv[nd] *
+                      ((_coord(s_up, nd) - _coord(s_dn, nd)) / (2 * h[d]))
+            end
+            G[d] += cdp.discount * w * dv
+        end
+    end
+
+    H = flow + cdp.discount * cont
+    for d in 1:M
+        G[d] = -G[d]
+    end
+    return -H
+end
+
+"""
+    _s_wise_max_multi!(cdp, s, C, fec, dfecs, xout, use_foc)
+
+Find the optimal value and action at state `s` for an `M`-dimensional
+continuous action space by box-constrained maximization, warm-started at
+`xout` (`NaN` entries mean cold start from the box center). With
+`use_foc = true` (and `dfecs` available), `Fminbox(LBFGS)` with the analytic
+objective gradient is tried first, falling back to derivative-free
+`Fminbox(NelderMead)` on any failure or non-finite outcome; with
+`use_foc = false`, Nelder-Mead is used directly.
+
+Writes the maximizer into `xout` and returns the maximized value.
+"""
+function _s_wise_max_multi!(cdp::ContinuousDP{N}, s, C, fec::FunEvalCache,
+                            dfecs, xout::AbstractVector{Float64},
+                            use_foc::Bool) where N
+    a = cdp.actions
+    M = _action_dim(a)
+    lb = collect(Float64, a.x_lb(s))
+    ub = collect(Float64, a.x_ub(s))
+    off = ntuple(d -> sqrt(eps()) * (ub[d] - lb[d]), Val(M))
+    x0 = [isfinite(xout[d]) ?
+              clamp(xout[d], lb[d] + off[d], ub[d] - off[d]) :
+              0.5 * (lb[d] + ub[d]) for d in 1:M]
+
+    # Fminbox requires a finite objective at the starting point; if the
+    # warm start (or the box center on a cold start) is infeasible, probe a
+    # coarse lattice over the box for the best feasible point
+    Hx0 = -_negH_multi!(nothing, cdp, s, C, fec, dfecs, x0, lb, ub, Val(M))
+    if !isfinite(Hx0)
+        ts = (0.1, 0.3, 0.5, 0.7, 0.9)
+        best = -Inf
+        for I in CartesianIndices(ntuple(_ -> length(ts), Val(M)))
+            cand = [lb[d] + ts[I[d]] * (ub[d] - lb[d]) for d in 1:M]
+            Hc = -_negH_multi!(nothing, cdp, s, C, fec, dfecs, cand, lb,
+                               ub, Val(M))
+            if isfinite(Hc) && Hc > best
+                best = Hc
+                copyto!(x0, cand)
+            end
+        end
+        if !isfinite(best)
+            # No feasible action found: mirror the discrete-actions
+            # convention (value -Inf at the tried point)
+            copyto!(xout, x0)
+            return -Inf
+        end
+        Hx0 = best
+    end
+
+    if use_foc && dfecs !== nothing
+        # Work caps keep near-infeasible corner states bounded (a capped
+        # best-effort there is preferable to seconds of barrier refinement)
+        opts = Optim.Options(iterations=100, outer_iterations=5)
+        # Backtracking line search: only ever shrinks the step, so it stays
+        # robust (and cheap) when trial points hit -Inf reward regions
+        inner = Optim.LBFGS(linesearch=Optim.LineSearches.BackTracking())
+        obj = only_fg!((F, G, x) -> begin
+            v = _negH_multi!(G, cdp, s, C, fec, dfecs, x, lb, ub, Val(M))
+            F === nothing ? nothing : v
+        end)
+        r = try
+            Optim.optimize(obj, lb, ub, copy(x0), Optim.Fminbox(inner),
+                           opts)
+        catch err
+            err isa InterruptException && rethrow()
+            nothing
+        end
+        if r !== nothing && isfinite(Optim.minimum(r)) &&
+           Optim.minimum(r) <= -Hx0 + sqrt(eps()) * (1 + abs(Hx0))
+            copyto!(xout, Optim.minimizer(r))
+            return -Optim.minimum(r)
+        end
+    end
+
+    # Derivative-free path: cyclic coordinate-wise Brent maximization --
+    # the M-dimensional generalization of the scalar :brent path, reusing
+    # the same robust univariate machinery (Nelder-Mead variants proved
+    # unreliable here: Fminbox(NelderMead) can terminate at the starting
+    # point, and plain Nelder-Mead stalls against -Inf regions)
+    x = copy(x0)
+    Hcur = Hx0
+    for _ in 1:20
+        moved = 0.0
+        for d in 1:M
+            rd = Optim.optimize(
+                t -> begin
+                    told = x[d]
+                    x[d] = t
+                    v = _negH_multi!(nothing, cdp, s, C, fec, dfecs, x,
+                                     lb, ub, Val(M))
+                    x[d] = told
+                    v
+                end,
+                lb[d], ub[d], Optim.Brent())
+            td = Optim.minimizer(rd)
+            if isfinite(Optim.minimum(rd)) && -Optim.minimum(rd) >= Hcur
+                moved = max(moved, abs(td - x[d]))
+                x[d] = td
+                Hcur = -Optim.minimum(rd)
+            end
+        end
+        moved <= sqrt(eps()) * max(1.0, maximum(abs, x)) && break
+    end
+    copyto!(xout, x)
+    return Hcur
+end
+
+# Sweep over all interpolation nodes for M-dimensional continuous actions;
+# rows of `X` are warm starts on input and maximizers on output
+function _s_wise_max_multi_sweep!(cdp::ContinuousDP, C::Vector{Float64},
+                                  Tv::Vector{Float64}, X::Matrix{Float64},
+                                  fec::FunEvalCache, dfecs, use_foc::Bool)
+    if use_foc && dfecs !== nothing
+        foreach(dfec -> set_coefs!(dfec, C), dfecs)
+    end
+    ss = cdp.interp.S
+    for i in 1:size(ss, 1)
+        Tv[i] = _s_wise_max_multi!(cdp, _row(ss, i), C, fec, dfecs,
+                                   view(X, i, :), use_foc)
+    end
+    return Tv, X
+end
+
 """
     s_wise_max!(cdp, ss, C, Tv[, fec])
 
@@ -892,6 +1153,9 @@ function bellman_operator!(cdp::ContinuousDP, C::Vector{Float64},
                            ws::CDPWorkspace)
     if cdp.actions isa DiscreteActions
         _s_wise_max_discrete_sweep!(cdp, C, ws.Tv, ws.X_ind, ws.fec)
+    elseif cdp.actions isa ContinuousActions && _action_dim(cdp.actions) > 1
+        _s_wise_max_multi_sweep!(cdp, C, ws.Tv, ws.X, ws.fec, ws.dfecs,
+                                 ws.inner_solver == :foc)
     elseif _use_foc(ws)
         _s_wise_max_foc_sweep!(cdp, C, ws.Tv, ws.X, ws.fec, ws.dfecs)
     else
@@ -907,6 +1171,10 @@ function bellman_operator!(cdp::ContinuousDP, C::Vector{Float64},
         X_ind = Vector{Int}(undef, length(Tv))
         _s_wise_max_discrete_sweep!(cdp, C, Tv, X_ind,
                                     FunEvalCache(cdp.interp.basis))
+    elseif cdp.actions isa ContinuousActions && _action_dim(cdp.actions) > 1
+        ws = CDPWorkspace(cdp)
+        _s_wise_max_multi_sweep!(cdp, C, Tv, ws.X, ws.fec, ws.dfecs,
+                                 ws.inner_solver == :foc)
     else
         s_wise_max!(cdp, cdp.interp.S, C, Tv)
     end
@@ -964,7 +1232,8 @@ factorized in sparse form.
 # Arguments
 
 - `cdp::ContinuousDP`: The dynamic program.
-- `X::AbstractVector`: Policy function vector (action values).
+- `X::AbstractVecOrMat`: Policy function (action values); an `n x M`
+  matrix for `M`-dimensional continuous actions.
 - `C::Vector{Float64}`: A buffer array to hold the basis coefficients.
 - `fec::FunEvalCache`: Workspace whose per-dimension caches are used for
   basis evaluation at the next states. Constructed internally if not given.
@@ -973,18 +1242,18 @@ factorized in sparse form.
 
 - `C::Vector{Float64}`: Updated basis coefficient vector.
 """
-function evaluate_policy!(cdp::ContinuousDP, X::AbstractVector,
+function evaluate_policy!(cdp::ContinuousDP, X::AbstractVecOrMat,
                           C::Vector{Float64}, fec::FunEvalCache)
     A_lu = _policy_system_lu(cdp.interp.Phi, cdp, X, fec)
     ss = cdp.interp.S
     for i in 1:size(ss, 1)
-        C[i] = cdp.f(_row(ss, i), X[i])
+        C[i] = cdp.f(_row(ss, i), _row(X, i))
     end
     ldiv!(A_lu, C)
     return C
 end
 
-evaluate_policy!(cdp::ContinuousDP, X::AbstractVector,
+evaluate_policy!(cdp::ContinuousDP, X::AbstractVecOrMat,
                  C::Vector{Float64}) =
     evaluate_policy!(cdp, X, C, FunEvalCache(cdp.interp.basis))
 
@@ -1016,7 +1285,7 @@ function _policy_system_lu(Phi::AbstractMatrix, cdp::ContinuousDP, X, fec)
         s = _row(ss, i)
         for j in eachindex(cdp.weights)
             e = _row(cdp.shocks, j)
-            s_next = cdp.g(s, X[i], e)
+            s_next = cdp.g(s, _row(X, i), e)
             _sub_basis_row!(A, i, fec, s_next,
                             cdp.discount * cdp.weights[j])
         end
@@ -1058,7 +1327,7 @@ function _policy_system_lu(Phi::SparseMatrixCSC, cdp::ContinuousDP, X, fec)
         s = _row(ss, i)
         for j in eachindex(cdp.weights)
             e = _row(cdp.shocks, j)
-            s_next = cdp.g(s, X[i], e)
+            s_next = cdp.g(s, _row(X, i), e)
             _append_basis_row!(Is, Js, Vs, i, fec, s_next, cdp.weights[j])
         end
     end
@@ -1114,6 +1383,10 @@ function policy_iteration_operator!(cdp::ContinuousDP, C::Vector{Float64},
     if cdp.actions isa DiscreteActions
         _s_wise_max_discrete_sweep!(cdp, C, ws.Tv, ws.X_ind, ws.fec)
         evaluate_policy!(cdp, view(cdp.actions.vals, ws.X_ind), C, ws.fec)
+    elseif cdp.actions isa ContinuousActions && _action_dim(cdp.actions) > 1
+        _s_wise_max_multi_sweep!(cdp, C, ws.Tv, ws.X, ws.fec, ws.dfecs,
+                                 ws.inner_solver == :foc)
+        evaluate_policy!(cdp, ws.X, C, ws.fec)
     elseif _use_foc(ws)
         _s_wise_max_foc_sweep!(cdp, C, ws.Tv, ws.X, ws.fec, ws.dfecs)
         evaluate_policy!(cdp, ws.X, C, ws.fec)
@@ -1426,6 +1699,12 @@ function simulate!(rng::AbstractRNG, s_path::VecOrMat,
         fec = FunEvalCache(res.cdp.interp.basis)
         policy = s -> res.cdp.actions.vals[
             _s_wise_max_discrete!(res.cdp, s, res.C, fec)[2]]
+    elseif res.cdp.actions isa ContinuousActions &&
+           _action_dim(res.cdp.actions) > 1
+        basis = Basis(map(LinParams, res.eval_nodes_coord, ntuple(i -> 0, N)))
+        itps = [Interpoland(basis, res.X[:, d])
+                for d in 1:_action_dim(res.cdp.actions)]
+        policy = s -> map(itp -> itp(s), itps)
     else
         basis = Basis(map(LinParams, res.eval_nodes_coord, ntuple(i -> 0, N)))
         X_interp = Interpoland(basis, res.X)

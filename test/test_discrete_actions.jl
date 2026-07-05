@@ -128,10 +128,10 @@ using ContinuousDPs: CDPWorkspace, FunEvalCache, _s_wise_max_discrete!
         @test_throws ArgumentError solve(cdp_c, LQA, verbose=0,
                                          inner_solver=:bogus,
                                          point=(1.0, 0.5, 1.0))
-        # multi-dimensional continuous actions are not supported yet (#88)
+        # the action dimension must be a positive integer
         lb1(s) = 0.0
         ub1(s) = 1.0
         @test_throws ArgumentError ContinuousActions{
-            2,typeof(lb1),typeof(ub1)}(lb1, ub1)
+            0,typeof(lb1),typeof(ub1)}(lb1, ub1)
     end
 end
