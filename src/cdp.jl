@@ -13,6 +13,7 @@ References
 using BasisMatrices
 import Optim
 using FiniteDiff
+using SparseArrays: SparseMatrixCSC, sparse
 import QuantEcon.ScalarOrArray
 
 
@@ -787,8 +788,11 @@ evaluate_policy!(cdp::ContinuousDP, X::Vector{Float64},
                  C::Vector{Float64}) =
     evaluate_policy!(cdp, X, C, FunEvalCache(cdp.interp.basis))
 
-# Basis-function values at the point `x`, as (first column, counts, value
-# buffers, base linear column index) for row assembly
+# Evaluate the per-dimension basis functions at the point `x` (values are
+# left in `fec.caches[d].vals`) and return `(nvals, base)`: the number of
+# nonzero basis functions per dimension, and the linear column index of the
+# tensor-product basis function formed by the first nonzero function of
+# every dimension
 @inline function _basis_row_parts(fec::FunEvalCache{N}, x) where N
     firsts_nvals = ntuple(
         d -> point_evalbase!(fec.caches[d], _coord(x, d)), Val(N)
