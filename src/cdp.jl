@@ -1264,6 +1264,10 @@ function solve(cdp::ContinuousDP{N}, method::Type{Algo}=PFI;
                kwargs...) where {Algo<:DPAlgorithm,N}
     tol = Float64(tol)
     res = CDPSolveResult{Algo,N}(cdp, tol, max_iter)
+    # Validate before the LQA override below, so that an invalid value is
+    # rejected for every method, as documented
+    inner_solver in (:foc, :brent) ||
+        throw(ArgumentError("inner_solver must be :foc or :brent"))
     # LQA has no inner maximization: skip the FOC derivative caches
     ws = CDPWorkspace(cdp; inner_solver=(Algo === LQA ? :brent : inner_solver))
     ldiv!(res.C, cdp.interp.Phi_lu, v_init)

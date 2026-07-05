@@ -105,6 +105,15 @@ using ContinuousDPs: CDPWorkspace, FunEvalCache, _s_wise_max_discrete!
               ContinuousDPs.bellman_operator!(cdp_d, copy(C0), ws)
     end
 
+    @testset "continuous action spaces: backward-compatible containers" begin
+        # The legacy constructor path must keep the pre-ActionSpace
+        # container types (regression tripwire for #88)
+        res_c = solve(cdp_c, PFI, verbose=0)
+        @test res_c.X isa Vector{Float64}
+        @test isempty(res_c.X_ind)
+        @test cdp_c.actions isa ContinuousActions{1}
+    end
+
     @testset "copy constructor and argument errors" begin
         cdp3 = ContinuousDP(cdp_d; discount=0.9)
         @test cdp3.actions === cdp_d.actions
@@ -112,9 +121,13 @@ using ContinuousDPs: CDPWorkspace, FunEvalCache, _s_wise_max_discrete!
         @test_throws ArgumentError DiscreteActions(Float64[])
         @test_throws ArgumentError solve(cdp_d, LQA, verbose=0,
                                          point=(1.0, 0.5, 1.0))
-        # inner_solver has no effect for discrete actions but is validated
+        # inner_solver has no effect for discrete actions or LQA but is
+        # validated in both cases
         @test_throws ArgumentError solve(cdp_d, PFI, verbose=0,
                                          inner_solver=:bogus)
+        @test_throws ArgumentError solve(cdp_c, LQA, verbose=0,
+                                         inner_solver=:bogus,
+                                         point=(1.0, 0.5, 1.0))
         # multi-dimensional continuous actions are not supported yet (#88)
         lb1(s) = 0.0
         ub1(s) = 1.0
