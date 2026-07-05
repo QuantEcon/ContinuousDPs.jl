@@ -210,6 +210,10 @@ Base.ndims(::CDPSolveResult{Algo,N}) where {Algo,N} = N
 
 Evaluate the value function and the policy function at the evaluation nodes.
 
+The result arrays `res.V`, `res.X`, and `res.resid` are updated in place
+when their lengths already match the number of evaluation nodes, and
+reallocated otherwise.
+
 # Arguments
 
 - `res::CDPSolveResult`: Solution object to update in place.
@@ -218,8 +222,14 @@ Evaluate the value function and the policy function at the evaluation nodes.
 """
 function evaluate!(res::CDPSolveResult, fec::FunEvalCache)
     cdp, C, s_nodes = res.cdp, res.C, res.eval_nodes
-    res.V, res.X = s_wise_max(cdp, s_nodes, C, fec)
-    res.resid = res.V - vec(funeval(C, cdp.interp.basis, s_nodes))
+    n = size(s_nodes, 1)
+    length(res.V) == n || (res.V = Vector{Float64}(undef, n))
+    length(res.X) == n || (res.X = Vector{Float64}(undef, n))
+    length(res.resid) == n || (res.resid = Vector{Float64}(undef, n))
+    s_wise_max!(cdp, s_nodes, C, res.V, res.X, fec)
+    for i in 1:n
+        res.resid[i] = res.V[i] - funeval_point!(fec, C, _row(s_nodes, i))
+    end
     return res
 end
 
@@ -281,8 +291,13 @@ policy, and `resid` is the Bellman residual at `s_nodes`.
 """
 function (res::CDPSolveResult)(s_nodes::AbstractArray{Float64})
     cdp, C = res.cdp, res.C
-    V, X = s_wise_max(cdp, s_nodes, C)
-    resid = V - vec(funeval(C, cdp.interp.basis, s_nodes))
+    fec = FunEvalCache(cdp.interp.basis)
+    V, X = s_wise_max(cdp, s_nodes, C, fec)
+    n = size(s_nodes, 1)
+    resid = Vector{Float64}(undef, n)
+    for i in 1:n
+        resid[i] = V[i] - funeval_point!(fec, C, _row(s_nodes, i))
+    end
     return V, X, resid
 end
 

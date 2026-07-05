@@ -18,6 +18,36 @@ using ContinuousDPs: CDPWorkspace, bellman_operator!, policy_iteration_operator!
     @test !converged
 end
 
+@testset "evaluate! in-place buffers" begin
+    f(s, x) = log(x)
+    g(s, x, e) = clamp(e * s^0.65 - x, 0.5, 2.0)
+    shocks, weights = qnwnorm(5, 1.0, 0.01)
+    basis = Basis(ChebParams(20, 0.5, 2.0))
+    cdp = ContinuousDP(f, g, 0.95, shocks, weights, s -> 1e-8, s -> s, basis)
+    res = solve(cdp, PFI, verbose=0)
+
+    # Same-length evaluation nodes: the result arrays are reused in place
+    grid1 = collect(range(0.5, 2.0, length=100))
+    set_eval_nodes!(res, grid1)
+    V1, X1, resid1 = res.V, res.X, res.resid
+    grid2 = collect(range(0.6, 1.9, length=100))
+    set_eval_nodes!(res, grid2)
+    @test res.V === V1
+    @test res.X === X1
+    @test res.resid === resid1
+
+    # Different length: reallocated
+    set_eval_nodes!(res, collect(range(0.5, 2.0, length=50)))
+    @test res.V !== V1
+    @test length(res.V) == 50
+
+    # Values agree with the callable interface at the same nodes
+    V, X, resid = res(res.eval_nodes)
+    @test V == res.V
+    @test X == res.X
+    @test resid == res.resid
+end
+
 @testset "CDPWorkspace" begin
     beta = 0.95
     f(s, x) = log(x)
