@@ -95,6 +95,16 @@ using ContinuousDPs: CDPWorkspace, FunEvalCache, _s_wise_max_discrete!
         @test res2.X == [:stay, :save][res2.X_ind]
     end
 
+    @testset "legacy bellman_operator! overload supports discrete actions" begin
+        res = solve(cdp_d, PFI, verbose=0)
+        C0 = copy(res.C)
+        n = cdp_d.interp.length
+        ws = CDPWorkspace(cdp_d)
+        Tv = Vector{Float64}(undef, n)
+        @test ContinuousDPs.bellman_operator!(cdp_d, copy(C0), Tv) ==
+              ContinuousDPs.bellman_operator!(cdp_d, copy(C0), ws)
+    end
+
     @testset "copy constructor and argument errors" begin
         cdp3 = ContinuousDP(cdp_d; discount=0.9)
         @test cdp3.actions === cdp_d.actions
@@ -102,5 +112,13 @@ using ContinuousDPs: CDPWorkspace, FunEvalCache, _s_wise_max_discrete!
         @test_throws ArgumentError DiscreteActions(Float64[])
         @test_throws ArgumentError solve(cdp_d, LQA, verbose=0,
                                          point=(1.0, 0.5, 1.0))
+        # inner_solver has no effect for discrete actions but is validated
+        @test_throws ArgumentError solve(cdp_d, PFI, verbose=0,
+                                         inner_solver=:bogus)
+        # multi-dimensional continuous actions are not supported yet (#88)
+        lb1(s) = 0.0
+        ub1(s) = 1.0
+        @test_throws ArgumentError ContinuousActions{
+            2,typeof(lb1),typeof(ub1)}(lb1, ub1)
     end
 end

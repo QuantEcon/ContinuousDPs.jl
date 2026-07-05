@@ -97,6 +97,13 @@ actions are tracked in issue #88).
 struct ContinuousActions{M,Tlb,Tub} <: ActionSpace
     x_lb::Tlb
     x_ub::Tub
+
+    function ContinuousActions{M,Tlb,Tub}(x_lb, x_ub) where {M,Tlb,Tub}
+        M == 1 || throw(ArgumentError(
+            "only one-dimensional continuous action spaces are supported " *
+            "for now (multi-dimensional actions are tracked in issue #88)"))
+        return new{M,Tlb,Tub}(x_lb, x_ub)
+    end
 end
 
 ContinuousActions(x_lb, x_ub) =
@@ -434,8 +441,8 @@ Not thread-safe: use one workspace per thread.
   interpolation nodes for a discrete action space; empty otherwise.
 - `inner_solver::Symbol`: `:foc` to solve the inner maximization via its
   first-order condition (with Brent as automatic fallback), or `:brent` to
-  always use derivative-free Brent maximization. Ignored for a discrete
-  action space (solved by enumeration).
+  always use derivative-free Brent maximization. Has no effect for a
+  discrete action space (solved by enumeration), but is still validated.
 """
 struct CDPWorkspace{TF<:FunEvalCache,TD}
     fec::TF
@@ -896,7 +903,13 @@ end
 
 function bellman_operator!(cdp::ContinuousDP, C::Vector{Float64},
                            Tv::Vector{Float64})
-    Tv = s_wise_max!(cdp, cdp.interp.S, C, Tv)
+    if cdp.actions isa DiscreteActions
+        X_ind = Vector{Int}(undef, length(Tv))
+        _s_wise_max_discrete_sweep!(cdp, C, Tv, X_ind,
+                                    FunEvalCache(cdp.interp.basis))
+    else
+        s_wise_max!(cdp, cdp.interp.S, C, Tv)
+    end
     ldiv!(C, cdp.interp.Phi_lu, Tv)
     return C
 end
@@ -1230,9 +1243,10 @@ Solve the continuous-state dynamic program by the specified method.
   unavailable or non-finite (and is used only for continuously
   differentiable bases: any Chebyshev, or splines of degree >= 2), but it
   does not attempt to detect nonconcavity or multiple stationary points.
-  Use `inner_solver=:brent` for the derivative-free path. Ignored for
-  LQA (which has no inner maximization) and for discrete action spaces
-  (solved by exact enumeration).
+  Use `inner_solver=:brent` for the derivative-free path. The choice has
+  no effect for LQA (which has no inner maximization) or for discrete
+  action spaces (solved by exact enumeration), but the value is still
+  validated.
 - `point::Tuple{ScalarOrArray, ScalarOrArray, ScalarOrArray}`: Keyword argument
   required when `method` is `LQA`. Specify the steady state `(s, x, e)` around
   which the LQ approximation is constructed.
