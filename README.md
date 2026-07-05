@@ -70,7 +70,8 @@ actions (with the bound functions returning length-`M` tuples or
 vectors; policy
 functions are then stored as `n x M` matrices), or `DiscreteActions(vals)`
 for a finite set of actions of arbitrary type (solved by exact enumeration,
-with `res.X_ind` holding the indices of the optimal actions into `vals`).
+with `res.X_ind` holding the indices of the optimal actions into `vals`). `DiscreteActions(vals)` represents a fixed finite action set; for
+state-dependent infeasibility, return `-Inf` from `f(s, x)`.
 
 Then call `solve(cdp)` to obtain the value function, policy function, and
 residuals. The inner maximization over continuous actions is solved via the
