@@ -1,4 +1,4 @@
-using ContinuousDPs: CDPWorkspace, set_coefs!, _s_wise_max_foc!
+using ContinuousDPs: CDPWorkspace, set_coefs!, _s_wise_max_foc!, _s_wise_max!
 using QuantEcon: qnwlogn
 
 @testset "FOC inner solver" begin
@@ -31,6 +31,28 @@ using QuantEcon: qnwlogn
         @test res_brent.converged
         @test res_foc.V ≈ res_brent.V rtol=1e-8
         @test res_foc.X ≈ res_brent.X atol=1e-6
+    end
+
+    @testset "direct interior FOC/Brent agreement: $label" for (label, basis) in [
+        ("Cheb", Basis(ChebParams(30, s_min, s_max))),
+        ("Spline k=3", Basis(SplineParams(50, s_min, s_max, 3))),
+    ]
+        # Compare the two inner solvers state by state at the converged
+        # coefficients: the solve-level comparison cannot see the FOC
+        # maximizers directly, since `evaluate!` recomputes `res.X` with
+        # Brent
+        cdp = growth_model(basis, s_min, s_max)
+        res = solve(cdp, PFI, verbose=0, inner_solver=:foc)
+        ws = CDPWorkspace(cdp)
+        foreach(dfec -> set_coefs!(dfec, res.C), ws.dfecs)
+        for i in 1:cdp.interp.length
+            s = cdp.interp.S[i]
+            v_foc, x_foc = _s_wise_max_foc!(cdp, s, res.C, ws.fec, ws.dfecs,
+                                            NaN)
+            v_brent, x_brent = _s_wise_max!(cdp, s, res.C, ws.fec)
+            @test v_foc ≈ v_brent rtol=1e-8
+            @test x_foc ≈ x_brent atol=1e-6
+        end
     end
 
     @testset "corner solution" begin

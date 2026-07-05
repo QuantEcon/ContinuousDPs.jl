@@ -934,10 +934,14 @@ Solve the continuous-state dynamic program by the specified method.
   in VFI and PFI. `:foc` (default) solves the first-order condition by
   safeguarded root-finding, warm-started across iterations, using the exact
   gradient of the fitted value function and finite differences of `f` and
-  `g`; it falls back to Brent maximization state-by-state whenever the
-  first-order condition is unavailable or ill-behaved, and is used only for
-  continuously differentiable bases (any Chebyshev; splines of degree >= 2).
-  `:brent` always uses derivative-free Brent maximization.
+  `g`. It is intended for smooth, effectively concave inner problems where
+  the first-order condition identifies the maximizing action: it falls
+  back to Brent maximization state-by-state when derivative evaluation is
+  unavailable or non-finite (and is used only for continuously
+  differentiable bases: any Chebyshev, or splines of degree >= 2), but it
+  does not attempt to detect nonconcavity or multiple stationary points.
+  Use `inner_solver=:brent` for the derivative-free path. Ignored for
+  LQA, which has no inner maximization.
 - `point::Tuple{ScalarOrArray, ScalarOrArray, ScalarOrArray}`: Keyword argument
   required when `method` is `LQA`. Specify the steady state `(s, x, e)` around
   which the LQ approximation is constructed.
@@ -955,7 +959,8 @@ function solve(cdp::ContinuousDP{N}, method::Type{Algo}=PFI;
                kwargs...) where {Algo<:DPAlgorithm,N}
     tol = Float64(tol)
     res = CDPSolveResult{Algo,N}(cdp, tol, max_iter)
-    ws = CDPWorkspace(cdp; inner_solver=inner_solver)
+    # LQA has no inner maximization: skip the FOC derivative caches
+    ws = CDPWorkspace(cdp; inner_solver=(Algo === LQA ? :brent : inner_solver))
     ldiv!(res.C, cdp.interp.Phi_lu, v_init)
     _solve!(cdp, res, ws, verbose, print_skip; kwargs...)
     evaluate!(res, ws.fec)
