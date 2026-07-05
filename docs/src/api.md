@@ -11,8 +11,16 @@ CurrentModule = ContinuousDPs
 ```@docs
 ContinuousDP
 ContinuousDP(::Any, ::Any, ::Real, ::AbstractVecOrMat, ::Vector{Float64},
-             ::Any, ::Any, ::BasisMatrices.Basis)
+             ::ActionSpace, ::BasisMatrices.Basis)
 ContinuousDP(::ContinuousDP)
+```
+
+### Action Spaces
+
+```@docs
+ActionSpace
+ContinuousActions
+DiscreteActions
 ```
 
 ### Solving the Model
