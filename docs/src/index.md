@@ -66,7 +66,8 @@ where
 
 Instead of `x_lb` and `x_ub`, an action space object can be passed:
 `ContinuousActions{M}(x_lb, x_ub)` for an `M`-dimensional box of continuous
-actions (with the bound functions returning length-`M` tuples; policy
+actions (with the bound functions returning length-`M` tuples or
+vectors; policy
 functions are then stored as `n x M` matrices), or `DiscreteActions(vals)`
 for a finite set of actions of arbitrary type (solved by exact enumeration,
 with `res.X_ind` holding the indices of the optimal actions into `vals`).
