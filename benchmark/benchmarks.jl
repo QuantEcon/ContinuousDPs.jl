@@ -150,7 +150,7 @@ for (label, cdp) in cases
 
     # Policy evaluation: matrix assembly + LU solve (#75)
     grp["evaluate_policy"] = @benchmarkable evaluate_policy!(
-        $cdp, $X0, C
+        $cdp, $X0, C, $(ws.fec)
     ) setup = (C = Vector{Float64}(undef, $n)) evals = 1
 
     # Evaluation on a non-interpolation grid (#74)
