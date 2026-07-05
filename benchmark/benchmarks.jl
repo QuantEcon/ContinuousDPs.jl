@@ -186,6 +186,46 @@ let
     ) setup = (C = copy($C0)) evals = 1
 end
 
+#= Two-control case =#
+
+# Santos (1999) model in its original two-control formulation (l, k'):
+# consumption implied by the resource constraint, infeasible pairs get -Inf
+function growth_model_2d_2ctrl(basis, k_min, k_max)
+    beta = 0.95
+    lambda = 1 / 3
+    A = 10.0
+    alpha = 0.34
+    rho = 0.90
+    y2(k, z, l) = z * A * k^alpha * (1 - l)^(1 - alpha)
+    function f(s, x)
+        k, logz = s
+        c = y2(k, exp(logz), x[1]) - x[2]
+        c > 0 || return -Inf
+        return lambda * log(c) + (1 - lambda) * log(x[1])
+    end
+    g(s, x, e) = (x[2], rho * s[2] + e)
+    shocks, weights = qnwnorm(7, 0.0, 0.008^2)
+    actions = ContinuousActions{2}(s -> (1e-4, k_min), s -> (1 - 1e-4, k_max))
+    return ContinuousDP(f, g, beta, shocks, weights, actions, basis)
+end
+
+let
+    cdp = growth_model_2d_2ctrl(
+        Basis(SplineParams(nk - 1, k_min, k_max, 2),
+              SplineParams(nlogz - 1, logz_min, logz_max, 2)),
+        k_min, k_max)
+    grp = SUITE["2d_spline_2ctrl"] = BenchmarkGroup()
+    grp["solve_PFI"] = @benchmarkable solve($cdp, PFI; verbose=0)
+    grp["solve_VFI_50iter"] =
+        @benchmarkable solve($cdp, VFI; max_iter=50, verbose=0)
+    res = solve(cdp, PFI; verbose=0)
+    C0 = copy(res.C)
+    ws = CDPWorkspace(cdp)
+    grp["bellman_operator"] = @benchmarkable bellman_operator!(
+        $cdp, C, $ws
+    ) setup = (C = copy($C0)) evals = 1
+end
+
 #= Standalone execution =#
 
 if abspath(PROGRAM_FILE) == @__FILE__
