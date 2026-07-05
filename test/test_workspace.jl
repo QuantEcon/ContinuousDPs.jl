@@ -29,12 +29,13 @@ end
     res = solve(cdp, PFI, verbose=0)
     C0 = copy(res.C)
     n = cdp.interp.length
-    ws = CDPWorkspace(cdp)
+    ws = CDPWorkspace(cdp, inner_solver=:brent)
 
     @test length(ws.Tv) == n
     @test length(ws.X) == n
 
-    # Workspace-based operators agree with the buffer-based ones
+    # Workspace-based operators (with the Brent inner solver) agree with the
+    # buffer-based ones
     Tv = Vector{Float64}(undef, n)
     @test bellman_operator!(cdp, copy(C0), ws) ==
           bellman_operator!(cdp, copy(C0), Tv)
