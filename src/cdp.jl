@@ -287,10 +287,10 @@ end
 
 
 """
-    CDPWorkspace{TF}
+    CDPWorkspace{TF,TD}
 
 Preallocated buffers used by the solution algorithms for a `ContinuousDP`.
-Construct with `CDPWorkspace(cdp)`.
+Construct with `CDPWorkspace(cdp; inner_solver=:foc)`.
 
 Not thread-safe: use one workspace per thread.
 
@@ -298,27 +298,59 @@ Not thread-safe: use one workspace per thread.
 
 - `fec::TF<:FunEvalCache`: Workspace for point evaluation of the value
   function.
+- `dfecs::TD`: Tuple of `DerivFunEvalCache`s for the gradient of the value
+  function (one per state dimension), or `nothing` if the basis does not
+  support the first-order-condition solver (see below).
 - `Tv::Vector{Float64}`: Buffer for updated values at the interpolation
   nodes.
 - `X::Vector{Float64}`: Buffer for updated actions at the interpolation
-  nodes.
+  nodes (initialized to `NaN`; also serves as the warm start for the inner
+  maximization in the next sweep).
+- `inner_solver::Symbol`: `:foc` to solve the inner maximization via its
+  first-order condition (with Brent as automatic fallback), or `:brent` to
+  always use derivative-free Brent maximization.
 """
-struct CDPWorkspace{TF<:FunEvalCache}
+struct CDPWorkspace{TF<:FunEvalCache,TD}
     fec::TF
+    dfecs::TD
     Tv::Vector{Float64}
     X::Vector{Float64}
+    inner_solver::Symbol
 end
 
-"""
-    CDPWorkspace(cdp::ContinuousDP)
+# The FOC solver requires the fitted value function to be continuously
+# differentiable: any Chebyshev basis, or splines of degree >= 2. For
+# piecewise linear bases the derivative is a step function, on which
+# root-finding is meaningless.
+_foc_suitable(p::ChebParams) = length(p) >= 2
+_foc_suitable(p::SplineParams) = p.k >= 2
+_foc_suitable(p::BasisParams) = false
 
-Construct a `CDPWorkspace` for `cdp`.
 """
-CDPWorkspace(cdp::ContinuousDP) = CDPWorkspace(
-    FunEvalCache(cdp.interp.basis),
-    Vector{Float64}(undef, cdp.interp.length),
-    Vector{Float64}(undef, cdp.interp.length)
-)
+    CDPWorkspace(cdp::ContinuousDP; inner_solver=:foc)
+
+Construct a `CDPWorkspace` for `cdp`. See [`solve`](@ref) for the meaning of
+`inner_solver`.
+"""
+function CDPWorkspace(cdp::ContinuousDP{N}; inner_solver::Symbol=:foc) where N
+    inner_solver in (:foc, :brent) ||
+        throw(ArgumentError("inner_solver must be :foc or :brent"))
+    basis = cdp.interp.basis
+    dfecs = if inner_solver == :foc &&
+               all(d -> _foc_suitable(basis.params[d]), 1:N)
+        ntuple(d -> DerivFunEvalCache(
+                   basis, ntuple(i -> Int(i == d), Val(N))), Val(N))
+    else
+        nothing
+    end
+    return CDPWorkspace(
+        FunEvalCache(basis),
+        dfecs,
+        Vector{Float64}(undef, cdp.interp.length),
+        fill(NaN, cdp.interp.length),
+        inner_solver
+    )
+end
 
 
 #= Methods =#
@@ -362,6 +394,192 @@ function _s_wise_max!(cdp::ContinuousDP, s, C, fec::FunEvalCache)
     x = Optim.maximizer(res)::Float64
     return v, x
 end
+
+
+#= First-order-condition inner solver =#
+
+# Relative step for central finite differences of the user's f and g
+const _FOC_RELSTEP = cbrt(eps(Float64))
+
+"""
+    _objective_and_deriv(cdp, s, C, fec, dfecs, x, x_lb, x_ub)
+
+Evaluate the inner objective `H(x) = f(s, x) + beta * E[V^(g(s, x, e))]` and
+its derivative `H'(x) = f_x + beta * E[grad V^(g(s, x, e)) . g_x]` at the
+action `x`. The gradient of the fitted value function is evaluated exactly
+via `dfecs` (whose coefficients must be set with `set_coefs!` beforehand),
+while `f_x` and `g_x` are computed by central finite differences with the
+step shrunk so that `x ± h` stay within `[x_lb, x_ub]` (so that `f` and `g`
+are never called at infeasible actions); if no adequate step exists,
+`(NaN, NaN)` is returned to trigger the Brent fallback.
+
+# Returns
+
+- `H::Float64`, `Hp::Float64`: Objective value and derivative (may be
+  non-finite, in which case the caller should fall back to Brent).
+"""
+function _objective_and_deriv(cdp::ContinuousDP{N}, s, C, fec::FunEvalCache,
+                              dfecs, x::Float64, x_lb::Float64,
+                              x_ub::Float64) where N
+    h = min(_FOC_RELSTEP * max(abs(x), 1.0), x - x_lb, x_ub - x)
+    h > eps() * max(abs(x), 1.0) || return NaN, NaN
+    f0 = cdp.f(s, x)
+    fp = (cdp.f(s, x + h) - cdp.f(s, x - h)) / (2h)
+    cont = 0.0
+    contp = 0.0
+    for j in eachindex(cdp.weights)
+        e = _row(cdp.shocks, j)
+        s_next = cdp.g(s, x, e)
+        s_up = cdp.g(s, x + h, e)
+        s_dn = cdp.g(s, x - h, e)
+        v = funeval_point!(fec, C, s_next)
+        dv = _grad_dot_gx(dfecs, s_next, s_up, s_dn, h)
+        w = cdp.weights[j]
+        cont += w * v
+        contp += w * dv
+    end
+    H = f0 + cdp.discount * cont
+    Hp = fp + cdp.discount * contp
+    return H, Hp
+end
+
+# grad V^(s_next) . g_x, with g_x by central differences, unrolled over the
+# state dimensions
+@inline function _grad_dot_gx(dfecs::NTuple{N,DerivFunEvalCache}, s_next,
+                              s_up, s_dn, h::Float64) where N
+    parts = ntuple(
+        d -> funeval_point!(dfecs[d], s_next) *
+             ((_coord(s_up, d) - _coord(s_dn, d)) / (2h)),
+        Val(N)
+    )
+    return sum(parts)
+end
+
+"""
+    _s_wise_max_foc!(cdp, s, C, fec, dfecs, x_prev)
+
+Find the optimal value and action at state `s` by solving the first-order
+condition `H'(x) = 0` with safeguarded bracketing root-finding (regula falsi
+with the Illinois modification), warm-started at `x_prev` (`NaN` for a cold
+start). Falls back to the Brent-based `_s_wise_max!` whenever the objective
+or its derivative is non-finite at a required point. Corner solutions are
+detected from the sign of `H'` during the bracketing expansion.
+
+The coefficients of `dfecs` must have been set with `set_coefs!(., C)`.
+"""
+function _s_wise_max_foc!(cdp::ContinuousDP, s, C, fec::FunEvalCache, dfecs,
+                          x_prev::Float64)
+    lb, ub = Float64(cdp.x_lb(s)), Float64(cdp.x_ub(s))
+    width = ub - lb
+    width > 0 || return _s_wise_max!(cdp, s, C, fec)
+
+    # Evaluation points are kept slightly inside the bounds, where f is more
+    # likely to be finite (e.g. log(x) at x_lb = 0)
+    off = sqrt(eps()) * width
+    lo, hi = lb + off, ub - off
+
+    x0 = isfinite(x_prev) ? clamp(x_prev, lo, hi) : 0.5 * (lo + hi)
+    H0, Hp0 = _objective_and_deriv(cdp, s, C, fec, dfecs, x0, lb, ub)
+    (isfinite(H0) && isfinite(Hp0)) ||
+        return _s_wise_max!(cdp, s, C, fec)
+
+    # Bracket a sign change of H' by expanding from x0 in the uphill
+    # direction; `a` keeps H' > 0, `b` keeps H' < 0
+    a, Ha, Hpa = x0, H0, Hp0
+    b, Hb, Hpb = x0, H0, Hp0
+    if Hp0 > 0
+        step = 0.02 * width
+        while true
+            xt = min(a + step, hi)
+            Ht, Hpt = _objective_and_deriv(cdp, s, C, fec, dfecs, xt, lb, ub)
+            (isfinite(Ht) && isfinite(Hpt)) ||
+                return _s_wise_max!(cdp, s, C, fec)
+            if Hpt <= 0
+                b, Hb, Hpb = xt, Ht, Hpt
+                break
+            end
+            a, Ha, Hpa = xt, Ht, Hpt
+            xt >= hi && return Ht, xt  # H increasing up to the bound
+            step *= 4
+        end
+    elseif Hp0 < 0
+        step = 0.02 * width
+        while true
+            xt = max(b - step, lo)
+            Ht, Hpt = _objective_and_deriv(cdp, s, C, fec, dfecs, xt, lb, ub)
+            (isfinite(Ht) && isfinite(Hpt)) ||
+                return _s_wise_max!(cdp, s, C, fec)
+            if Hpt >= 0
+                a, Ha, Hpa = xt, Ht, Hpt
+                break
+            end
+            b, Hb, Hpb = xt, Ht, Hpt
+            xt <= lo && return Ht, xt  # H decreasing down from the bound
+            step *= 4
+        end
+    else  # Hp0 == 0: already at a stationary point
+        return H0, x0
+    end
+
+    # Safeguarded root-finding on H' over [a, b] with H'(a) > 0 > H'(b):
+    # regula falsi with the Illinois modification, bisection safeguard
+    wa, wb = Hpa, Hpb  # (possibly rescaled) values used for interpolation
+    side = 0
+    xtol = sqrt(eps()) * max(1.0, abs(a), abs(b))
+    for _ in 1:60
+        b - a <= xtol && break
+        xm = (a * wb - b * wa) / (wb - wa)
+        if !(a < xm < b)
+            xm = 0.5 * (a + b)
+        end
+        Hm, Hpm = _objective_and_deriv(cdp, s, C, fec, dfecs, xm, lb, ub)
+        (isfinite(Hm) && isfinite(Hpm)) ||
+            return _s_wise_max!(cdp, s, C, fec)
+        if Hpm > 0
+            a, Ha = xm, Hm
+            wa = Hpm
+            side == 1 && (wb *= 0.5)
+            side = 1
+        elseif Hpm < 0
+            b, Hb = xm, Hm
+            wb = Hpm
+            side == -1 && (wa *= 0.5)
+            side = -1
+        else
+            return Hm, xm
+        end
+    end
+    return Ha >= Hb ? (Ha, a) : (Hb, b)
+end
+
+"""
+    _s_wise_max_foc_sweep!(cdp, C, Tv, X, fec, dfecs)
+
+Run the FOC-based inner maximization over all interpolation nodes, storing
+values in `Tv` and maximizers in `X`. The previous contents of `X` serve as
+warm starts (`NaN` entries mean cold start). Sets the coefficients of
+`dfecs` from `C`. Falls back to Brent state-by-state on exceptions from the
+model functions (e.g. a `DomainError` at a finite-difference point).
+"""
+function _s_wise_max_foc_sweep!(cdp::ContinuousDP, C::Vector{Float64},
+                                Tv::Vector{Float64}, X::Vector{Float64},
+                                fec::FunEvalCache, dfecs)
+    foreach(dfec -> set_coefs!(dfec, C), dfecs)
+    ss = cdp.interp.S
+    for i in 1:size(ss, 1)
+        s = _row(ss, i)
+        Tv[i], X[i] =
+            try
+                _s_wise_max_foc!(cdp, s, C, fec, dfecs, X[i])
+            catch err
+                err isa InterruptException && rethrow()
+                _s_wise_max!(cdp, s, C, fec)
+            end
+    end
+    return Tv, X
+end
+
+_use_foc(ws::CDPWorkspace) = ws.inner_solver == :foc && ws.dfecs !== nothing
 
 """
     s_wise_max!(cdp, ss, C, Tv[, fec])
@@ -479,7 +697,11 @@ stored in `Tv` (or `ws.Tv`).
 """
 function bellman_operator!(cdp::ContinuousDP, C::Vector{Float64},
                            ws::CDPWorkspace)
-    s_wise_max!(cdp, cdp.interp.S, C, ws.Tv, ws.fec)
+    if _use_foc(ws)
+        _s_wise_max_foc_sweep!(cdp, C, ws.Tv, ws.X, ws.fec, ws.dfecs)
+    else
+        s_wise_max!(cdp, cdp.interp.S, C, ws.Tv, ws.X, ws.fec)
+    end
     ldiv!(C, cdp.interp.Phi_lu, ws.Tv)
     return C
 end
@@ -590,7 +812,11 @@ Perform one step of policy function iteration and update the basis coefficients.
 """
 function policy_iteration_operator!(cdp::ContinuousDP, C::Vector{Float64},
                                     ws::CDPWorkspace)
-    compute_greedy!(cdp, cdp.interp.S, C, ws.X, ws.fec)
+    if _use_foc(ws)
+        _s_wise_max_foc_sweep!(cdp, C, ws.Tv, ws.X, ws.fec, ws.dfecs)
+    else
+        compute_greedy!(cdp, cdp.interp.S, C, ws.X, ws.fec)
+    end
     evaluate_policy!(cdp, ws.X, C)
     return C
 end
@@ -704,6 +930,18 @@ Solve the continuous-state dynamic program by the specified method.
   2 for warning and convergence messages during iteration).
 - `print_skip::Integer`: If `verbose == 2`, how many iterations between print
   messages.
+- `inner_solver::Symbol`: How to solve the inner maximization over actions
+  in VFI and PFI. `:foc` (default) solves the first-order condition by
+  safeguarded root-finding, warm-started across iterations, using the exact
+  gradient of the fitted value function and finite differences of `f` and
+  `g`. It is intended for smooth, effectively concave inner problems where
+  the first-order condition identifies the maximizing action: it falls
+  back to Brent maximization state-by-state when derivative evaluation is
+  unavailable or non-finite (and is used only for continuously
+  differentiable bases: any Chebyshev, or splines of degree >= 2), but it
+  does not attempt to detect nonconcavity or multiple stationary points.
+  Use `inner_solver=:brent` for the derivative-free path. Ignored for
+  LQA, which has no inner maximization.
 - `point::Tuple{ScalarOrArray, ScalarOrArray, ScalarOrArray}`: Keyword argument
   required when `method` is `LQA`. Specify the steady state `(s, x, e)` around
   which the LQ approximation is constructed.
@@ -717,10 +955,12 @@ function solve(cdp::ContinuousDP{N}, method::Type{Algo}=PFI;
                tol::Real=sqrt(eps()), max_iter::Integer=500,
                verbose::Integer=2,
                print_skip::Integer=50,
+               inner_solver::Symbol=:foc,
                kwargs...) where {Algo<:DPAlgorithm,N}
     tol = Float64(tol)
     res = CDPSolveResult{Algo,N}(cdp, tol, max_iter)
-    ws = CDPWorkspace(cdp)
+    # LQA has no inner maximization: skip the FOC derivative caches
+    ws = CDPWorkspace(cdp; inner_solver=(Algo === LQA ? :brent : inner_solver))
     ldiv!(res.C, cdp.interp.Phi_lu, v_init)
     _solve!(cdp, res, ws, verbose, print_skip; kwargs...)
     evaluate!(res, ws.fec)

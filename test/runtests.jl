@@ -7,6 +7,7 @@ using Random
 
 include("test_point_eval.jl")
 include("test_workspace.jl")
+include("test_foc.jl")
 include("test_cdp.jl")
 include("test_lq_approx.jl")
 include("test_cdp_multidim.jl")
