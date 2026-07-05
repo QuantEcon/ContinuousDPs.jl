@@ -81,7 +81,7 @@ using ContinuousDPs: CDPWorkspace
         # test_cdp_multidim.jl; the derivative-free :brent path (cyclic
         # coordinate-wise Brent) is a fallback with looser policy accuracy
         # on cross-coupled objectives
-        tol_l = solver == :foc ? 2e-2 : 1e-1
+        tol_l = solver == :foc ? 2e-2 : 1.5e-1
         tol_kp = solver == :foc ? 2e-1 : 1.0
         @test maximum(abs, res.V .- v_star_on_S) < 1.0
         @test maximum(abs, view(res.X, :, 1) .- l_star) < tol_l
@@ -143,6 +143,40 @@ using ContinuousDPs: CDPWorkspace
         s_path = simulate(res, [1.0, 0.0], 30)
         @test all(k_min .<= view(s_path, 1, :) .<= k_max)
         @test all(logz_min .<= view(s_path, 2, :) .<= logz_max)
+    end
+
+    @testset "inner_solver=:brent is respected in re-evaluation" begin
+        # A :brent solve must not have its policy recomputed through the
+        # derivative-based path by evaluate!/set_eval_nodes!/the callable
+        res_b = solve(cdp2, PFI, verbose=0, inner_solver=:brent)
+        @test res_b.inner_solver == :brent
+        # res.X rows must equal a direct derivative-free recomputation
+        fec = ContinuousDPs.FunEvalCache(cdp2.interp.basis)
+        for i in (1, 40, 100)
+            xout = fill(NaN, 2)
+            ContinuousDPs._s_wise_max_multi!(cdp2, cdp2.interp.S[i, :],
+                                             res_b.C, fec, nothing, xout,
+                                             false)
+            @test xout == res_b.X[i, :]
+        end
+        # and the callable interface stays consistent with res.X
+        V, X, resid = res_b(res_b.eval_nodes)
+        @test X == res_b.X
+    end
+
+    @testset "copy constructor preserves the action dimension" begin
+        new_lb(s) = (1e-3, k_min)
+        cdp3 = ContinuousDP(cdp2; x_lb=new_lb)
+        @test cdp3.actions isa ContinuousActions{2}
+        @test cdp3.actions.x_lb === new_lb
+        @test cdp3.actions.x_ub === cdp2.actions.x_ub
+    end
+
+    @testset "bound validation" begin
+        bad1 = ContinuousDP(cdp2; x_lb=s -> (1e-4,))  # wrong length
+        @test_throws ArgumentError solve(bad1, PFI, verbose=0)
+        bad2 = ContinuousDP(cdp2; x_lb=s -> (NaN, k_min))  # non-finite
+        @test_throws ArgumentError solve(bad2, PFI, verbose=0)
     end
 
     @testset "construction" begin

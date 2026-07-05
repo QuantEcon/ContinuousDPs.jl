@@ -257,7 +257,7 @@ function ContinuousDP(cdp::ContinuousDP;
     if x_lb !== nothing || x_ub !== nothing
         actions isa ContinuousActions || throw(ArgumentError(
             "x_lb/x_ub keywords apply only to continuous action spaces"))
-        actions = ContinuousActions(
+        actions = ContinuousActions{_action_dim(actions)}(
             x_lb === nothing ? actions.x_lb : x_lb,
             x_ub === nothing ? actions.x_ub : x_ub
         )
@@ -280,6 +280,9 @@ algorithm `Algo`.
 - `C::Vector{Float64}`: Basis coefficient vector for the fitted value function.
 - `converged::Bool`: Whether the algorithm converged.
 - `num_iter::Int`: Number of iterations performed.
+- `inner_solver::Symbol`: Inner solver used by `solve` (`:foc` or
+  `:brent`); also used when re-evaluating the policy (e.g. by
+  `set_eval_nodes!`) for multi-dimensional continuous actions.
 - `eval_nodes::TE<:VecOrMat`: Nodes at which the solution is evaluated.
   Defaults to `cdp.interp.S`.
 - `eval_nodes_coord::NTuple{N,Vector{Float64}}`: Coordinate vectors of the
@@ -299,6 +302,7 @@ mutable struct CDPSolveResult{Algo<:DPAlgorithm,N,TCDP<:ContinuousDP{N},
     C::Vector{Float64}
     converged::Bool
     num_iter::Int
+    inner_solver::Symbol
     eval_nodes::TE
     eval_nodes_coord::NTuple{N,Vector{Float64}}
     V::Vector{Float64}
@@ -307,7 +311,8 @@ mutable struct CDPSolveResult{Algo<:DPAlgorithm,N,TCDP<:ContinuousDP{N},
     resid::Vector{Float64}
 
     function CDPSolveResult{Algo,N}(
-            cdp::TCDP, tol::Float64, max_iter::Integer
+            cdp::TCDP, tol::Float64, max_iter::Integer,
+            inner_solver::Symbol=:foc
         ) where {Algo,N,TCDP<:ContinuousDP{N}}
         C = zeros(cdp.interp.length)
         converged = false
@@ -319,7 +324,7 @@ mutable struct CDPSolveResult{Algo<:DPAlgorithm,N,TCDP<:ContinuousDP{N},
         X_ind = Int[]
         resid = Float64[]
         res = new{Algo,N,TCDP,typeof(eval_nodes),typeof(X)}(
-            cdp, tol, max_iter, C, converged, num_iter,
+            cdp, tol, max_iter, C, converged, num_iter, inner_solver,
             eval_nodes, eval_nodes_coord, V, X, X_ind, resid
         )
         return res
@@ -369,7 +374,9 @@ function evaluate!(res::CDPSolveResult, fec::FunEvalCache)
             res.X[i] = a.vals[res.X_ind[i]]
         end
     elseif a isa ContinuousActions && _action_dim(a) > 1
-        dfecs = _eval_dfecs(cdp)
+        # Respect the inner solver used by `solve`: a :brent solve must not
+        # have its policy re-evaluated through the derivative-based path
+        dfecs = res.inner_solver == :foc ? _eval_dfecs(cdp) : nothing
         dfecs === nothing || foreach(dfec -> set_coefs!(dfec, C), dfecs)
         for i in 1:n
             res.V[i] = _s_wise_max_multi!(cdp, _row(s_nodes, i), C, fec,
@@ -456,7 +463,7 @@ function (res::CDPSolveResult)(s_nodes::AbstractArray{Float64})
     elseif a isa ContinuousActions && _action_dim(a) > 1
         V = Vector{Float64}(undef, n)
         X = _policy_buffer(a, n)
-        dfecs = _eval_dfecs(cdp)
+        dfecs = res.inner_solver == :foc ? _eval_dfecs(cdp) : nothing
         dfecs === nothing || foreach(dfec -> set_coefs!(dfec, C), dfecs)
         for i in 1:n
             V[i] = _s_wise_max_multi!(cdp, _row(s_nodes, i), C, fec,
@@ -916,11 +923,12 @@ end
 
 Find the optimal value and action at state `s` for an `M`-dimensional
 continuous action space by box-constrained maximization, warm-started at
-`xout` (`NaN` entries mean cold start from the box center). With
-`use_foc = true` (and `dfecs` available), `Fminbox(LBFGS)` with the analytic
-objective gradient is tried first, falling back to derivative-free
-`Fminbox(NelderMead)` on any failure or non-finite outcome; with
-`use_foc = false`, Nelder-Mead is used directly.
+`xout` (`NaN` entries mean cold start from the box center, with a coarse
+feasible-start probe if that is infeasible). With `use_foc = true` (and
+`dfecs` available), `Fminbox(LBFGS)` with the analytic objective gradient
+is tried first, falling back to derivative-free cyclic coordinate-wise
+Brent maximization on any failure or non-finite outcome; with
+`use_foc = false`, coordinate-wise Brent is used directly.
 
 Writes the maximizer into `xout` and returns the maximized value.
 """
@@ -931,6 +939,14 @@ function _s_wise_max_multi!(cdp::ContinuousDP{N}, s, C, fec::FunEvalCache,
     M = _action_dim(a)
     lb = collect(Float64, a.x_lb(s))
     ub = collect(Float64, a.x_ub(s))
+    (length(lb) == M && length(ub) == M) || throw(ArgumentError(
+        "x_lb(s) and x_ub(s) must return length-$M bounds"))
+    for d in 1:M
+        (isfinite(lb[d]) && isfinite(ub[d]) && lb[d] < ub[d]) ||
+            throw(ArgumentError(
+                "invalid action bounds in dimension $d at state s = $s: " *
+                "[$(lb[d]), $(ub[d])]"))
+    end
     off = ntuple(d -> sqrt(eps()) * (ub[d] - lb[d]), Val(M))
     x0 = [isfinite(xout[d]) ?
               clamp(xout[d], lb[d] + off[d], ub[d] - off[d]) :
@@ -1041,7 +1057,9 @@ end
 """
     s_wise_max!(cdp, ss, C, Tv[, fec])
 
-Find optimal value for each grid point.
+Find optimal value for each grid point. These helpers apply to
+one-dimensional continuous action spaces; discrete and multi-dimensional
+action spaces are handled internally by the operators.
 
 # Arguments
 
@@ -1539,11 +1557,11 @@ function solve(cdp::ContinuousDP{N}, method::Type{Algo}=PFI;
                inner_solver::Symbol=:foc,
                kwargs...) where {Algo<:DPAlgorithm,N}
     tol = Float64(tol)
-    res = CDPSolveResult{Algo,N}(cdp, tol, max_iter)
     # Validate before the LQA override below, so that an invalid value is
     # rejected for every method, as documented
     inner_solver in (:foc, :brent) ||
         throw(ArgumentError("inner_solver must be :foc or :brent"))
+    res = CDPSolveResult{Algo,N}(cdp, tol, max_iter, inner_solver)
     # LQA has no inner maximization: skip the FOC derivative caches
     ws = CDPWorkspace(cdp; inner_solver=(Algo === LQA ? :brent : inner_solver))
     ldiv!(res.C, cdp.interp.Phi_lu, v_init)
