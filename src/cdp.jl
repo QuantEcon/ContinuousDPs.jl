@@ -943,8 +943,11 @@ function _s_wise_max_multi!(cdp::ContinuousDP{N}, s, C, fec::FunEvalCache,
     if !isfinite(Hx0)
         ts = (0.1, 0.3, 0.5, 0.7, 0.9)
         best = -Inf
+        cand = similar(x0)
         for I in CartesianIndices(ntuple(_ -> length(ts), Val(M)))
-            cand = [lb[d] + ts[I[d]] * (ub[d] - lb[d]) for d in 1:M]
+            for d in 1:M
+                cand[d] = lb[d] + ts[I[d]] * (ub[d] - lb[d])
+            end
             Hc = -_negH_multi!(nothing, cdp, s, C, fec, dfecs, cand, lb,
                                ub, Val(M))
             if isfinite(Hc) && Hc > best
@@ -1702,9 +1705,9 @@ function simulate!(rng::AbstractRNG, s_path::VecOrMat,
     elseif res.cdp.actions isa ContinuousActions &&
            _action_dim(res.cdp.actions) > 1
         basis = Basis(map(LinParams, res.eval_nodes_coord, ntuple(i -> 0, N)))
-        itps = [Interpoland(basis, res.X[:, d])
-                for d in 1:_action_dim(res.cdp.actions)]
-        policy = s -> map(itp -> itp(s), itps)
+        M = _action_dim(res.cdp.actions)
+        itps = ntuple(d -> Interpoland(basis, res.X[:, d]), M)
+        policy = s -> map(itp -> itp(s), itps)  # map over a tuple: a tuple
     else
         basis = Basis(map(LinParams, res.eval_nodes_coord, ntuple(i -> 0, N)))
         X_interp = Interpoland(basis, res.X)

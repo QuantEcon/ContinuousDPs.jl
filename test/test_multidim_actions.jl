@@ -1,12 +1,13 @@
 using ContinuousDPs: CDPWorkspace
 
 @testset "Multi-dimensional continuous actions" begin
-    # Santos (1999, Sec. 7.3) stochastic growth model with leisure, in its
-    # original two-control formulation (cf. Santos's Table 19 two-variable
-    # maximization): controls x = (l, c) with l leisure and c consumption,
-    # k' = z*A*k^alpha*(1-l)^(1-alpha) + (1-delta)*k - c. With delta = 1 the
-    # analytical solution is the same as in test_cdp_multidim.jl: l* is
-    # constant and c* = (1 - alpha*beta) * y.
+    # Santos (1999, Sec. 7.3) stochastic growth model with leisure, in a
+    # two-control formulation (cf. Santos's Table 19 two-variable
+    # maximization): controls x = (l, k') with l leisure and k' next-period
+    # capital; consumption c = z*A*k^alpha*(1-l)^(1-alpha) + (1-delta)*k - k'
+    # is implied by the resource constraint. With delta = 1 the analytical
+    # solution is the same as in test_cdp_multidim.jl: l* is constant and
+    # k'* = alpha*beta*y.
     beta = 0.95
     lambda = 1 / 3
     A = 10.0
