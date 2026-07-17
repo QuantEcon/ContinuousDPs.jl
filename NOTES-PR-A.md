@@ -58,7 +58,9 @@ The `interp::Union{Interp{N},Nothing}` field is deprecation-era structure. When 
 deprecated basis-endowed constructors are removed (v0.4), do the threading refactor as
 a separate `MAINT:` PR behind the migrated test suite: `ContinuousDP{Tf,Tg,TR,TA}`
 loses the field **and the `N` parameter** (with it the `N = 0` sentinel); internals
-move to an internal bound type (e.g. `_BoundCDP{N}` wrapping `(cdp, interp)`) or take
+move to an internal bound type wrapping `(cdp, interp)` — name decided 2026-07-17:
+**`_CollocationProblem{N}`** (over `_BoundCDP`; "bound" describes the mechanism,
+not the object), with `_with_interp`'s successor becoming its constructor — or take
 `interp` explicitly; `CDPSolveResult` holds `cdp` and `interp` as separate fields.
 Signature changes will touch the semi-public operators tracked by
 `benchmark/benchmarks.jl`. Forward-compat rule for PR B: the POMDPs extension must not
@@ -85,14 +87,20 @@ reach through `res.cdp.interp` — consume only the public surface of `CDPSolveR
    paste into the PR body). Summary: **all internal kernels are unchanged** (time
    ratios 0.97-1.06 within the 10% tolerance, memory 1.00). The `solve_*` keys show
    the expected per-solve `Interp` construction now included in the timed call:
-   time is neutral everywhere except `1d_spline solve_PFI` (1.26x — a
-   milliseconds-scale solve where building + factorizing the 101-node sparse basis
-   matrix is a visible fraction), and memory ratios on `solve_*` are up by one
-   Interp construction (large *ratios* like 8.5x on VFI-50 correspond to small
-   absolute baselines, since main prepaid Interp at problem construction). If this
-   ever matters for re-solve-heavy workflows, the option is a lazily cached Interp
-   inside CollocationSolver (revisits D6; costs statelessness/thread-safety) —
-   recommend accepting as is and documenting.
+   time is neutral everywhere except `1d_spline solve_PFI` (1.26x), and memory
+   ratios on `solve_*` are up by one Interp construction (large *ratios* like
+   8.5x on VFI-50 correspond to small absolute baselines, since main prepaid
+   Interp at problem construction).
+   CORRECTION (2026-07-17, direct measurement on the suite's own models,
+   M4 Max, best-of-N): `Interp(basis)` costs 9.0 us (cheb n=50) / 28.1 us
+   (spline 101 nodes, k=3) vs solves of 2.76/6.83 ms (PFI) and 12.8/18.7 ms
+   (VFI-50) — a 0.1-0.4% share. So the 1.26x on `1d_spline solve_PFI` CANNOT
+   be the Interp construction (that would need a ~110 us baseline solve) and
+   is almost certainly run-to-run noise on a milliseconds-scale key. Before
+   pasting the judge table into the PR body, re-run that key from a clean
+   clone or annotate it as noise; the honest PR-body claim is: kernels
+   unchanged, `solve_*` time overhead 0.1-0.4% (measured directly), memory up
+   by one small Interp per solve.
    NOTE: PkgBenchmark cannot run in the working repo (LibGit2 chokes on
    `.claude/worktrees/`); run it from a clean clone.
 7. When the PR is complete: delete this file AND remove it from the git history.
@@ -126,6 +134,20 @@ reach through `res.cdp.interp` — consume only the public surface of `CDPSolveR
   2-3 orders of magnitude slower; keyword modes on the callable; exposing raw
   kernels) rejected. Future option on `PolicyFunction`: exact-greedy mode for
   continuous actions via a constructor keyword.
+- **Stateless `CollocationSolver` (D7) reaffirmed, now with measurements**
+  (revisited 2026-07-17 with eager construction — Interp built in the solver
+  constructor, immutable field — on the table). Rejected because: (a) the
+  per-solve `Interp` cost is 0.1-0.4% of the suite's solves (see the judge
+  CORRECTION in item 6), so even 10^3-10^5-solve estimation loops with a fixed
+  basis save under half a percent; (b) threading: for spline/linear bases
+  `Phi_lu` is an UMFPACK factorization whose `ldiv!` serializes through an
+  internal lock, so an eager solver shared across threads would make every
+  Bellman-operator `ldiv!` contend — exactly the threaded-parameter-sweep
+  workflow that would motivate eager; stateless keeps such sweeps
+  embarrassingly parallel with no one-solver-per-thread caveat; (c) type
+  noise (`CollocationSolver{Algo,TI<:Interp{...}}` leaks matrix/factorization
+  types), serialization weight, and aliasing of one Interp across all results.
+  If a future profile ever disagrees, eager (never lazy) is the mechanism.
 - **`CDPMDP` typing for discrete actions** (Float64-only vs parametric action
   type): postponed to PR B.
 - **`POMDPs.initialstate`**: leave undefined when not supplied (simulators take
