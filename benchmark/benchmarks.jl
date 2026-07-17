@@ -20,7 +20,7 @@ using BenchmarkTools
 using ContinuousDPs
 using ContinuousDPs:
     _s_wise_max!, bellman_operator!, compute_greedy!, evaluate_policy!,
-    FunEvalCache, CDPWorkspace, DiscreteActions
+    FunEvalCache, CDPWorkspace, DiscreteActions, Interp, _with_interp
 using BasisMatrices: Basis, ChebParams, SplineParams
 using QuantEcon: qnwlogn, qnwnorm
 
@@ -33,7 +33,7 @@ using QuantEcon: qnwlogn, qnwnorm
 # is extrapolated -- catastrophically so for the Chebyshev basis, making VFI
 # diverge. Restricting the action set (rather than clamping s' inside `g`)
 # keeps the transition law smooth.
-function growth_model_1d(basis, s_min, s_max)
+function growth_model_1d(s_min, s_max)
     alpha = 0.65
     f(s, x) = log(x)
     g(s, x, e) = e * s^alpha - x
@@ -41,7 +41,7 @@ function growth_model_1d(basis, s_min, s_max)
     e_min, e_max = extrema(shocks)
     x_lb(s) = max(1e-8, e_max * s^alpha - s_max)
     x_ub(s) = min(s, e_min * s^alpha - s_min)
-    return ContinuousDP(f, g, 0.95, shocks, weights, x_lb, x_ub, basis)
+    return ContinuousDP(f, g, 0.95, shocks, weights, x_lb, x_ub)
 end
 
 # 2-D stochastic optimal growth with leisure (Santos, 1999, Sec. 7.3;
@@ -49,7 +49,7 @@ end
 # within the interpolation domain [k_min, k_max] by clamping in `g`: unlike
 # in the 1-D model, the action bound ensuring k' <= k_max has no closed
 # form (k' is transcendental in x).
-function growth_model_2d(basis, k_min, k_max)
+function growth_model_2d(k_min, k_max)
     beta = 0.95
     lambda = 1 / 3
     A = 10.0
@@ -86,7 +86,7 @@ function growth_model_2d(basis, k_min, k_max)
     shocks, weights = qnwnorm(7, 0.0, 0.008^2)
     x_lb(s) = 1e-10
     x_ub(s) = 1 - 1e-10
-    return ContinuousDP(f, g, beta, shocks, weights, x_lb, x_ub, basis)
+    return ContinuousDP(f, g, beta, shocks, weights, x_lb, x_ub)
 end
 
 #= Benchmark cases =#
@@ -97,14 +97,13 @@ logz_min, logz_max = -0.32, 0.32
 nk, nlogz = 43, 3
 
 cases = [
-    ("1d_cheb", growth_model_1d(
-        Basis(ChebParams(50, s_min_1d, s_max_1d)), s_min_1d, s_max_1d)),
-    ("1d_spline", growth_model_1d(
-        Basis(SplineParams(99, s_min_1d, s_max_1d, 3)), s_min_1d, s_max_1d)),
-    ("2d_spline", growth_model_2d(
-        Basis(SplineParams(nk - 1, k_min, k_max, 2),
-              SplineParams(nlogz - 1, logz_min, logz_max, 2)),
-        k_min, k_max)),
+    ("1d_cheb", growth_model_1d(s_min_1d, s_max_1d),
+     Basis(ChebParams(50, s_min_1d, s_max_1d))),
+    ("1d_spline", growth_model_1d(s_min_1d, s_max_1d),
+     Basis(SplineParams(99, s_min_1d, s_max_1d, 3))),
+    ("2d_spline", growth_model_2d(k_min, k_max),
+     Basis(SplineParams(nk - 1, k_min, k_max, 2),
+           SplineParams(nlogz - 1, logz_min, logz_max, 2))),
 ]
 
 eval_grids = Dict(
@@ -118,39 +117,44 @@ eval_grids = Dict(
 
 const SUITE = BenchmarkGroup()
 
-for (label, cdp) in cases
+for (label, cdp, basis) in cases
     grp = SUITE[label] = BenchmarkGroup()
 
-    # End-to-end solves
-    grp["solve_PFI"] = @benchmarkable solve($cdp, PFI; verbose=0)
+    # End-to-end solves (includes the per-solve Interp construction)
+    solver_pfi = CollocationSolver(basis)
+    solver_vfi = CollocationSolver(basis; algorithm=VFI, max_iter=50)
+    grp["solve_PFI"] = @benchmarkable solve($cdp, $solver_pfi; verbose=0)
     grp["solve_VFI_50iter"] =
-        @benchmarkable solve($cdp, VFI; max_iter=50, verbose=0)
+        @benchmarkable solve($cdp, $solver_vfi; verbose=0)
 
-    # Kernel benchmarks at the converged solution, for realistic inputs
-    res = solve(cdp, PFI; verbose=0)
+    # Kernel benchmarks at the converged solution, for realistic inputs;
+    # the internal operators work on a problem with a bound interpolation
+    # scheme
+    res = solve(cdp, solver_pfi; verbose=0)
+    bcdp = _with_interp(cdp, Interp(basis))
     C0 = copy(res.C)
     X0 = copy(res.X)
-    n = cdp.interp.length
-    N = ndims(cdp)
+    n = bcdp.interp.length
+    N = ndims(bcdp)
 
     # Per-state optimization kernel (#73)
-    s_mid = N == 1 ? cdp.interp.S[div(n, 2)] : cdp.interp.S[div(n, 2), :]
-    fec = FunEvalCache(cdp.interp.basis)
+    s_mid = N == 1 ? bcdp.interp.S[div(n, 2)] : bcdp.interp.S[div(n, 2), :]
+    fec = FunEvalCache(bcdp.interp.basis)
     grp["s_wise_max_one_state"] =
-        @benchmarkable _s_wise_max!($cdp, $s_mid, $C0, $fec)
+        @benchmarkable _s_wise_max!($bcdp, $s_mid, $C0, $fec)
 
     # State loops over the kernel, using a preallocated workspace
-    ws = CDPWorkspace(cdp)
+    ws = CDPWorkspace(bcdp)
     grp["bellman_operator"] = @benchmarkable bellman_operator!(
-        $cdp, C, $ws
+        $bcdp, C, $ws
     ) setup = (C = copy($C0)) evals = 1
     grp["compute_greedy"] = @benchmarkable compute_greedy!(
-        $cdp, $(cdp.interp.S), $C0, $(ws.X), $(ws.fec)
+        $bcdp, $(bcdp.interp.S), $C0, $(ws.X), $(ws.fec)
     ) evals = 1
 
     # Policy evaluation: matrix assembly + LU solve (#75)
     grp["evaluate_policy"] = @benchmarkable evaluate_policy!(
-        $cdp, $X0, C, $(ws.fec)
+        $bcdp, $X0, C, $(ws.fec)
     ) setup = (C = Vector{Float64}(undef, $n)) evals = 1
 
     # Evaluation on a non-interpolation grid (#74)
@@ -162,27 +166,30 @@ end
 #= Discrete-action case =#
 
 # Discrete-action variant of the 1-D growth model (201 actions)
-function growth_model_1d_discrete(basis, s_min, s_max, K)
+function growth_model_1d_discrete(s_min, s_max, K)
     alpha = 0.65
     f(s, x) = x > 0 ? log(x) : -Inf
     g(s, x, e) = clamp(e * s^alpha - x, s_min, s_max)
     shocks, weights = qnwlogn(9, 0.0, 0.01)
     actions = DiscreteActions(collect(range(1e-3, s_max^alpha, length=K)))
-    return ContinuousDP(f, g, 0.95, shocks, weights, actions, basis)
+    return ContinuousDP(f, g, 0.95, shocks, weights, actions)
 end
 
 let
-    cdp = growth_model_1d_discrete(
-        Basis(ChebParams(50, s_min_1d, s_max_1d)), s_min_1d, s_max_1d, 201)
+    cdp = growth_model_1d_discrete(s_min_1d, s_max_1d, 201)
+    basis = Basis(ChebParams(50, s_min_1d, s_max_1d))
     grp = SUITE["1d_cheb_discrete"] = BenchmarkGroup()
-    grp["solve_PFI"] = @benchmarkable solve($cdp, PFI; verbose=0)
+    solver_pfi = CollocationSolver(basis)
+    solver_vfi = CollocationSolver(basis; algorithm=VFI, max_iter=50)
+    grp["solve_PFI"] = @benchmarkable solve($cdp, $solver_pfi; verbose=0)
     grp["solve_VFI_50iter"] =
-        @benchmarkable solve($cdp, VFI; max_iter=50, verbose=0)
-    res = solve(cdp, PFI; verbose=0)
+        @benchmarkable solve($cdp, $solver_vfi; verbose=0)
+    res = solve(cdp, solver_pfi; verbose=0)
+    bcdp = _with_interp(cdp, Interp(basis))
     C0 = copy(res.C)
-    ws = CDPWorkspace(cdp)
+    ws = CDPWorkspace(bcdp)
     grp["bellman_operator"] = @benchmarkable bellman_operator!(
-        $cdp, C, $ws
+        $bcdp, C, $ws
     ) setup = (C = copy($C0)) evals = 1
 end
 
@@ -190,7 +197,7 @@ end
 
 # Santos (1999) model in its original two-control formulation (l, k'):
 # consumption implied by the resource constraint, infeasible pairs get -Inf
-function growth_model_2d_2ctrl(basis, k_min, k_max)
+function growth_model_2d_2ctrl(k_min, k_max)
     beta = 0.95
     lambda = 1 / 3
     A = 10.0
@@ -206,23 +213,25 @@ function growth_model_2d_2ctrl(basis, k_min, k_max)
     g(s, x, e) = (x[2], rho * s[2] + e)
     shocks, weights = qnwnorm(7, 0.0, 0.008^2)
     actions = ContinuousActions{2}(s -> (1e-4, k_min), s -> (1 - 1e-4, k_max))
-    return ContinuousDP(f, g, beta, shocks, weights, actions, basis)
+    return ContinuousDP(f, g, beta, shocks, weights, actions)
 end
 
 let
-    cdp = growth_model_2d_2ctrl(
-        Basis(SplineParams(nk - 1, k_min, k_max, 2),
-              SplineParams(nlogz - 1, logz_min, logz_max, 2)),
-        k_min, k_max)
+    cdp = growth_model_2d_2ctrl(k_min, k_max)
+    basis = Basis(SplineParams(nk - 1, k_min, k_max, 2),
+                  SplineParams(nlogz - 1, logz_min, logz_max, 2))
     grp = SUITE["2d_spline_2ctrl"] = BenchmarkGroup()
-    grp["solve_PFI"] = @benchmarkable solve($cdp, PFI; verbose=0)
+    solver_pfi = CollocationSolver(basis)
+    solver_vfi = CollocationSolver(basis; algorithm=VFI, max_iter=50)
+    grp["solve_PFI"] = @benchmarkable solve($cdp, $solver_pfi; verbose=0)
     grp["solve_VFI_50iter"] =
-        @benchmarkable solve($cdp, VFI; max_iter=50, verbose=0)
-    res = solve(cdp, PFI; verbose=0)
+        @benchmarkable solve($cdp, $solver_vfi; verbose=0)
+    res = solve(cdp, solver_pfi; verbose=0)
+    bcdp = _with_interp(cdp, Interp(basis))
     C0 = copy(res.C)
-    ws = CDPWorkspace(cdp)
+    ws = CDPWorkspace(bcdp)
     grp["bellman_operator"] = @benchmarkable bellman_operator!(
-        $cdp, C, $ws
+        $bcdp, C, $ws
     ) setup = (C = copy($C0)) evals = 1
 end
 

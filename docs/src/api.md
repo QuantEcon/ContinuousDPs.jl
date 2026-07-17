@@ -11,7 +11,7 @@ CurrentModule = ContinuousDPs
 ```@docs
 ContinuousDP
 ContinuousDP(::Any, ::Any, ::Real, ::AbstractVecOrMat, ::Vector{Float64},
-             ::ActionSpace, ::BasisMatrices.Basis)
+             ::ActionSpace)
 ContinuousDP(::ContinuousDP)
 ```
 
@@ -26,6 +26,8 @@ DiscreteActions
 ### Solving the Model
 
 ```@docs
+CollocationSolver
+LQASolver
 solve
 VFI
 PFI
