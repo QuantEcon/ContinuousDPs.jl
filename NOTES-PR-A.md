@@ -52,6 +52,18 @@ instructive `ArgumentError` and forwards to `_solve_core`). LQA note: it *uses* 
 basis (fits its value function via `Phi_lu`), hence `LQASolver` carries one; `point`
 moved from a `solve` kwarg into `LQASolver`.
 
+## Planned future removal of the `interp` field (v0.4+, agreed 2026-07-17)
+
+The `interp::Union{Interp{N},Nothing}` field is deprecation-era structure. When the
+deprecated basis-endowed constructors are removed (v0.4), do the threading refactor as
+a separate `MAINT:` PR behind the migrated test suite: `ContinuousDP{Tf,Tg,TR,TA}`
+loses the field **and the `N` parameter** (with it the `N = 0` sentinel); internals
+move to an internal bound type (e.g. `_BoundCDP{N}` wrapping `(cdp, interp)`) or take
+`interp` explicitly; `CDPSolveResult` holds `cdp` and `interp` as separate fields.
+Signature changes will touch the semi-public operators tracked by
+`benchmark/benchmarks.jl`. Forward-compat rule for PR B: the POMDPs extension must not
+reach through `res.cdp.interp` — consume only the public surface of `CDPSolveResult`.
+
 ## Remaining work (in order)
 
 1. **New test file** (`test/test_solver_types.jl` or fold into `test_cdp.jl`): adapt
