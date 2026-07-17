@@ -79,9 +79,21 @@ reach through `res.cdp.interp` — consume only the public surface of `CDPSolveR
    keys in the judge report), kernels via `_with_interp`.
 5. Version stays 0.2.1 in this PR (per review): the 0.3.0 bump happens in a separate
    release PR. Release notes go there.
-6. **`PkgBenchmark.judge` vs `main`**: launched; report at
-   `scratchpad/judge_report.md` (re-run if lost: `judge(path, "collocation-solver",
-   "main")` with PkgBenchmark in a temp env). Paste the table into the PR body.
+6. ~~`PkgBenchmark.judge` vs `main`~~ DONE (target a0b186c vs baseline bbd2b26,
+   Julia 1.12.6, M4 Max; full table in the session scratchpad `judge_report.md` —
+   paste into the PR body). Summary: **all internal kernels are unchanged** (time
+   ratios 0.97-1.06 within the 10% tolerance, memory 1.00). The `solve_*` keys show
+   the expected per-solve `Interp` construction now included in the timed call:
+   time is neutral everywhere except `1d_spline solve_PFI` (1.26x — a
+   milliseconds-scale solve where building + factorizing the 101-node sparse basis
+   matrix is a visible fraction), and memory ratios on `solve_*` are up by one
+   Interp construction (large *ratios* like 8.5x on VFI-50 correspond to small
+   absolute baselines, since main prepaid Interp at problem construction). If this
+   ever matters for re-solve-heavy workflows, the option is a lazily cached Interp
+   inside CollocationSolver (revisits D6; costs statelessness/thread-safety) —
+   recommend accepting as is and documenting.
+   NOTE: PkgBenchmark cannot run in the working repo (LibGit2 chokes on
+   `.claude/worktrees/`); run it from a clean clone.
 7. When the PR is complete: delete this file AND remove it from the git history.
    Removing it from history is possible and reasonable as long as it happens *before*
    the branch lands on `main`:
