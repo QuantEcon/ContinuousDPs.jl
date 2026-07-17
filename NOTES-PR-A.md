@@ -64,29 +64,25 @@ Signature changes will touch the semi-public operators tracked by
 `benchmark/benchmarks.jl`. Forward-compat rule for PR B: the POMDPs extension must not
 reach through `res.cdp.interp` — consume only the public surface of `CDPSolveResult`.
 
-## Remaining work (in order)
+## Remaining work
 
-1. **New test file** (`test/test_solver_types.jl` or fold into `test_cdp.jl`): adapt
-   `scratchpad/smoke_pr_a.jl` (see git stash/scratch or rewrite: keyword-constructor
-   variants and exclusivity errors, `CollocationSolver`/`LQASolver` construction and
-   validation errors, old-vs-new exact agreement on PFI/VFI/LQA, `v_init` length check,
-   `ndims` error, `@inferred`, copy-constructor interp semantics). Register in
-   `test/runtests.jl`.
-2. **Migrate existing tests to the new API** (old API coverage shrinks to one dedicated
-   deprecation testset). Files: `test_cdp.jl`, `test_cdp_multidim.jl`, `test_foc.jl`,
-   `test_evaluate_policy.jl`, `test_workspace.jl`, `test_lq_approx.jl` construct via the
-   old constructor; internal-function tests can use `ContinuousDPs._with_interp`.
-3. **Docs sync** (per repo instructions, README + `docs/src/index.md` +
-   `examples/cdp_ex_optgrowth_jl.ipynb` are kept content-synchronized): rewrite the
-   problem-formulation/interface sections around primitives + solver. Also
-   `docs/make.jl` API page if it lists docstrings.
-4. **Benchmarks**: `benchmark/benchmarks.jl` — switch `solve` benches to the new API;
-   internal-operator benches need `_with_interp` for a bound instance.
-5. **Version bump** to 0.3.0 in `Project.toml`; release notes summarizing the
-   deprecations.
-6. **Full `PkgBenchmark.judge`** vs `main` (expect neutral; the only new per-solve cost
-   is `Interp` construction, which the old constructor paid at problem construction).
-7. Delete this file before merge.
+1. ~~New test file~~ DONE: `test/test_solver_types.jl` (58 tests incl. the deprecation
+   testset with exact old-vs-new agreement).
+2. ~~Migrate existing tests~~ DONE: all files construct primitives-only problems;
+   internal-function tests bind via `_with_interp`. Full suite green (842 tests).
+3. ~~Docs sync~~ DONE: README, `docs/src/index.md`, `docs/src/api.md`, and the
+   optgrowth notebook present the keyword constructor + solver types. The MF and
+   lqapprox notebooks were NOT touched (not part of the synchronized triple) — check
+   them before release and update if they construct `ContinuousDP` with a basis.
+4. ~~Benchmarks~~ DONE: solves via `CollocationSolver` (end-to-end timings now include
+   per-solve `Interp` construction — expect a small constant addition on `solve_*`
+   keys in the judge report), kernels via `_with_interp`.
+5. ~~Version bump~~ DONE: 0.3.0. Release notes go in the PR body.
+6. **`PkgBenchmark.judge` vs `main`**: launched; report at
+   `scratchpad/judge_report.md` (re-run if lost: `judge(path, "collocation-solver",
+   "main")` with PkgBenchmark in a temp env). Paste the table into the PR body.
+7. Delete this file before merge; open the PR with `Closes #8` and a deprecation
+   summary.
 
 ## Environment note
 
