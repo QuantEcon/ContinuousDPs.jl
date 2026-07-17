@@ -46,6 +46,15 @@ using QuantEcon: qnwlogn
             f=f, g=g, discount=beta, shocks=shocks, weights=weights,
             actions=(x_lb, x_ub))
 
+        # Keyword form with a discrete action space
+        x_grid = collect(range(0.1, 0.9, length=9))
+        cdp_disc = ContinuousDP(f=f, g=g, discount=beta, shocks=shocks,
+                                weights=weights,
+                                actions=DiscreteActions(x_grid))
+        @test cdp_disc.actions isa DiscreteActions
+        @test cdp_disc.actions.vals == x_grid
+        @test cdp_disc.interp === nothing
+
         # The state dimension is not known without a solver
         @test_throws ArgumentError ndims(cdp)
     end
@@ -68,6 +77,16 @@ using QuantEcon: qnwlogn
         @test_throws ArgumentError CollocationSolver(basis; algorithm=LQA)
         @test_throws ArgumentError CollocationSolver(basis;
                                                      inner_solver=:newton)
+
+        # Invalid tol / max_iter values are rejected
+        @test_throws ArgumentError CollocationSolver(basis; tol=0.0)
+        @test_throws ArgumentError CollocationSolver(basis; tol=-1e-8)
+        @test_throws ArgumentError CollocationSolver(basis; tol=NaN)
+        @test_throws ArgumentError CollocationSolver(basis; tol=Inf)
+        # max_iter=0 is allowed (fit v_init, iterate zero times); only
+        # negative values are rejected
+        @test CollocationSolver(basis; max_iter=0).max_iter == 0
+        @test_throws ArgumentError CollocationSolver(basis; max_iter=-1)
     end
 
     @testset "LQASolver construction" begin
@@ -95,6 +114,18 @@ using QuantEcon: qnwlogn
         # A primitives-only problem cannot be solved without a solver
         @test_throws ArgumentError solve(cdp, PFI; verbose=0)
         @test_throws ArgumentError solve(cdp; verbose=0)
+
+        # A solver is stateless: reuse across solves and problems gives
+        # results identical to fresh solves (Interp is built per call)
+        solver = CollocationSolver(basis)
+        res1 = solve(cdp, solver; verbose=0)
+        res2 = solve(cdp, solver; verbose=0)
+        @test res2.C == res1.C
+        @test res2.V == res1.V
+        @test res2.X == res1.X
+        res3 = solve(ContinuousDP(cdp; discount=0.9), solver; verbose=0)
+        @test res3.converged
+        @test res3.C != res1.C
     end
 
     @testset "deprecated API agrees exactly with the new API" begin
@@ -104,23 +135,38 @@ using QuantEcon: qnwlogn
         @test ndims(cdp_old) == 1
 
         for (algo, inner) in ((PFI, :foc), (VFI, :brent))
-            res_old = @test_deprecated solve(cdp_old, algo; verbose=0,
-                                             inner_solver=inner)
+            # The warning must recommend CollocationSolver for PFI/VFI
+            res_old = @test_deprecated r"CollocationSolver" solve(
+                cdp_old, algo; verbose=0, inner_solver=inner)
             res_new = solve(cdp, CollocationSolver(basis; algorithm=algo,
                                                    inner_solver=inner);
                             verbose=0)
             @test res_old.C == res_new.C
             @test res_old.V == res_new.V
             @test res_old.X == res_new.X
+            @test res_old.resid == res_new.resid
         end
 
-        # LQA: old kwarg path vs LQASolver
+        # LQA: old kwarg path vs LQASolver; the warning must recommend
+        # LQASolver (CollocationSolver rejects algorithm=LQA)
         point = (1.0, 0.5, 1.0)
-        res_lqa_old = @test_deprecated solve(cdp_old, LQA; point=point,
-                                             verbose=0)
+        res_lqa_old = @test_deprecated r"LQASolver" solve(
+            cdp_old, LQA; point=point, verbose=0)
         res_lqa_new = solve(cdp, LQASolver(basis; point=point); verbose=0)
         @test res_lqa_old.C == res_lqa_new.C
         @test res_lqa_old.V == res_lqa_new.V
+        @test res_lqa_old.X == res_lqa_new.X
+        @test res_lqa_old.resid == res_lqa_new.resid
+
+        # The explicitly supplied solver's basis wins over a basis stored
+        # by the deprecated constructor
+        basis_b = Basis(ChebParams(12, s_min, s_max))
+        res_b_old = solve(cdp_old, CollocationSolver(basis_b); verbose=0)
+        res_b_new = solve(cdp, CollocationSolver(basis_b); verbose=0)
+        @test res_b_old.cdp.interp.basis === basis_b
+        @test length(res_b_old.C) == 12
+        @test res_b_old.C == res_b_new.C
+        @test res_b_old.V == res_b_new.V
 
         # Deprecated ActionSpace-and-basis form
         cdp_old2 = @test_deprecated ContinuousDP(

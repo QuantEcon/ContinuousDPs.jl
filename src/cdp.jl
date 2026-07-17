@@ -1625,6 +1625,11 @@ struct CollocationSolver{Algo<:DPAlgorithm,TB<:Basis}
             "linear-quadratic approximation"))
         inner_solver in (:foc, :brent) ||
             throw(ArgumentError("inner_solver must be :foc or :brent"))
+        (isfinite(tol) && tol > 0) ||
+            throw(ArgumentError("tol must be a positive finite number"))
+        # max_iter == 0 is meaningful: fit v_init and iterate zero times
+        max_iter >= 0 ||
+            throw(ArgumentError("max_iter must be nonnegative"))
         return new{Algo,TB}(basis, inner_solver, Float64(tol), Int(max_iter))
     end
 end
@@ -1772,11 +1777,19 @@ function solve(cdp::ContinuousDP{N}, method::Type{Algo}=PFI;
     cdp.interp === nothing && throw(ArgumentError(
         "this ContinuousDP holds no interpolation basis; pass a solver, " *
         "e.g. `solve(cdp, CollocationSolver(basis))`"))
-    Base.depwarn(
-        "`solve(cdp, method; ...)` with the basis stored in the problem is " *
-        "deprecated: construct the problem without `basis` and call " *
-        "`solve(cdp, CollocationSolver(basis; algorithm=$Algo, ...))` " *
-        "(or `solve(cdp, LQASolver(basis; point=point))` for LQA).", :solve)
+    if Algo === LQA
+        Base.depwarn(
+            "`solve(cdp, LQA; ...)` with the basis stored in the problem " *
+            "is deprecated: construct the problem without `basis` and " *
+            "call `solve(cdp, LQASolver(basis; point=point))`.", :solve)
+    else
+        Base.depwarn(
+            "`solve(cdp, method; ...)` with the basis stored in the " *
+            "problem is deprecated: construct the problem without `basis` " *
+            "and call " *
+            "`solve(cdp, CollocationSolver(basis; algorithm=$Algo, ...))`.",
+            :solve)
+    end
     # Validate before the LQA override in _solve_core, so that an invalid
     # value is rejected for every method, as documented
     inner_solver in (:foc, :brent) ||

@@ -170,6 +170,23 @@ reach through `res.cdp.interp` — consume only the public surface of `CDPSolveR
   `POMDPs.solve`; the clash predates this package pair. Also: with dual-trigger
   weakdeps `[POMDPs, POMDPTools]`, the `as_mdp` MethodError hint must name both
   packages.
+- **LQA depwarn fix, solver validation, and test hardening (2026-07-17):**
+  1. BUG: the deprecated `solve(cdp, LQA; ...)` depwarn interpolated
+     `algorithm=LQA` into a `CollocationSolver` recommendation that would
+     throw. Fixed: the message now branches, recommending
+     `LQASolver(basis; point=point)` for LQA. Depwarn-text regressions added
+     (`@test_deprecated r"LQASolver"` / `r"CollocationSolver"`).
+  2. Old-vs-new equivalence extended: `X`/`resid` for LQA, `resid` for
+     PFI/VFI.
+  3. New test: an explicitly supplied solver basis wins over a basis stored
+     by the deprecated constructor.
+  4. New test: keyword constructor with `actions=DiscreteActions(...)`.
+  5. New test: stateless solver reuse across solves and problems.
+  6. `CollocationSolver` now validates `tol` (positive finite) and
+     `max_iter` (nonnegative only: `max_iter=0` is established semantics —
+     fit `v_init`, iterate zero times; used by the non-convergence-warning
+     and v_init pass-through tests — so it stays allowed).
+  Suite: 864 tests green (was 842).
 - **PR C mechanism** (explicit-finite contract vs `weighted_iterator`-consuming
   kernel refactor): left open.
 - **Housekeeping** (post design comment to #89, cross-ref on #8, note on
