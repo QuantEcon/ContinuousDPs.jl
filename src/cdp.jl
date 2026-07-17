@@ -174,8 +174,10 @@ _action_dim(::ContinuousActions{M}) where M = M
 """
     ContinuousDP{N,Tf,Tg,TR,TA,TI}
 
-Type representing a continuous-state dynamic program with `N`-dimensional state
-space.
+Type representing a continuous-state dynamic program. A `ContinuousDP` holds
+the primitives of the problem; the interpolation scheme used to solve it is
+supplied separately through a solver object (see [`CollocationSolver`](@ref)
+and [`LQASolver`](@ref)).
 
 # Fields
 
@@ -186,10 +188,13 @@ space.
 - `weights::Vector{Float64}`: Probability weights for the shock nodes.
 - `actions::TA<:ActionSpace`: Action space (see [`ContinuousActions`](@ref)
   and [`DiscreteActions`](@ref)).
-- `interp::TI<:Interp{N}`: Object that contains the information about the
-  interpolation scheme.
+- `interp::TI<:Union{Interp{N},Nothing}`: Internal. `nothing` for a
+  primitives-only problem (the normal case; `N == 0` then serves as a
+  placeholder); an `Interp{N}` bound to the problem by `solve` (or by the
+  deprecated basis-endowed constructor).
 """
-struct ContinuousDP{N,Tf,Tg,TR<:AbstractVecOrMat,TA<:ActionSpace,TI<:Interp{N}}
+struct ContinuousDP{N,Tf,Tg,TR<:AbstractVecOrMat,TA<:ActionSpace,
+                    TI<:Union{Interp{N},Nothing}}
     f::Tf
     g::Tg
     discount::Float64
@@ -200,11 +205,16 @@ struct ContinuousDP{N,Tf,Tg,TR<:AbstractVecOrMat,TA<:ActionSpace,TI<:Interp{N}}
 end
 
 """
-    ContinuousDP(f, g, discount, shocks, weights, actions, basis)
-    ContinuousDP(f, g, discount, shocks, weights, x_lb, x_ub, basis)
+    ContinuousDP(; f, g, discount, shocks, weights, x_lb, x_ub)
+    ContinuousDP(; f, g, discount, shocks, weights, actions)
+    ContinuousDP(f, g, discount, shocks, weights, actions)
+    ContinuousDP(f, g, discount, shocks, weights, x_lb, x_ub)
 
-Constructor for `ContinuousDP`. The second form is equivalent to passing
-`ContinuousActions(x_lb, x_ub)` as `actions`.
+Constructor for `ContinuousDP`. The problem is specified by its primitives
+only; the interpolation basis is supplied separately through the solver
+passed to `solve` (see [`CollocationSolver`](@ref) and [`LQASolver`](@ref)).
+Give either `actions`, or both `x_lb` and `x_ub` (equivalent to
+`actions = ContinuousActions(x_lb, x_ub)`).
 
 # Arguments
 
@@ -216,28 +226,67 @@ Constructor for `ContinuousDP`. The second form is equivalent to passing
 - `actions::ActionSpace`: Action space; alternatively give `x_lb`, `x_ub`
   (lower and upper bound of the action as functions of the state) for a
   one-dimensional continuous action space.
-- `basis::Basis`: Object that contains the interpolation basis information.
 """
 function ContinuousDP(f, g, discount::Real,
                       shocks::AbstractVecOrMat, weights::Vector{Float64},
-                      actions::ActionSpace,
-                      basis::Basis{N}) where {N}
-    interp = Interp(basis)
-    cdp = ContinuousDP(f, g, Float64(discount), shocks, weights, actions,
-                       interp)
-    return cdp
+                      actions::ActionSpace)
+    return ContinuousDP{0,typeof(f),typeof(g),typeof(shocks),
+                        typeof(actions),Nothing}(
+        f, g, Float64(discount), shocks, weights, actions, nothing)
 end
 
 ContinuousDP(f, g, discount::Real,
              shocks::AbstractVecOrMat, weights::Vector{Float64},
-             x_lb, x_ub, basis::Basis) =
+             x_lb, x_ub) =
     ContinuousDP(f, g, discount, shocks, weights,
-                 ContinuousActions(x_lb, x_ub), basis)
+                 ContinuousActions(x_lb, x_ub))
+
+function ContinuousDP(; f, g, discount, shocks, weights,
+                      x_lb=nothing, x_ub=nothing, actions=nothing)
+    if actions === nothing
+        (x_lb !== nothing && x_ub !== nothing) || throw(ArgumentError(
+            "give either `actions`, or both `x_lb` and `x_ub`"))
+        actions = ContinuousActions(x_lb, x_ub)
+    else
+        (x_lb === nothing && x_ub === nothing) || throw(ArgumentError(
+            "the `x_lb`/`x_ub` keywords cannot be combined with `actions`"))
+        actions isa ActionSpace || throw(ArgumentError(
+            "`actions` must be an ActionSpace " *
+            "(ContinuousActions or DiscreteActions)"))
+    end
+    return ContinuousDP(f, g, discount, shocks, weights, actions)
+end
+
+# Deprecated basis-endowed forms: the basis now belongs to the solver
+function ContinuousDP(f, g, discount::Real,
+                      shocks::AbstractVecOrMat, weights::Vector{Float64},
+                      actions::ActionSpace,
+                      basis::Basis{N}) where {N}
+    Base.depwarn(
+        "`ContinuousDP(f, g, discount, shocks, weights, actions, basis)` " *
+        "is deprecated: construct the problem without `basis` and pass " *
+        "`CollocationSolver(basis)` to `solve`.", :ContinuousDP)
+    return _with_interp(
+        ContinuousDP(f, g, discount, shocks, weights, actions), Interp(basis))
+end
+
+function ContinuousDP(f, g, discount::Real,
+                      shocks::AbstractVecOrMat, weights::Vector{Float64},
+                      x_lb, x_ub, basis::Basis)
+    Base.depwarn(
+        "`ContinuousDP(f, g, discount, shocks, weights, x_lb, x_ub, basis)` " *
+        "is deprecated: construct the problem without `basis` and pass " *
+        "`CollocationSolver(basis)` to `solve`.", :ContinuousDP)
+    return _with_interp(
+        ContinuousDP(f, g, discount, shocks, weights,
+                     ContinuousActions(x_lb, x_ub)),
+        Interp(basis))
+end
 
 """
     ContinuousDP(cdp::ContinuousDP; f=cdp.f, g=cdp.g, discount=cdp.discount,
                  shocks=cdp.shocks, weights=cdp.weights, actions=cdp.actions,
-                 x_lb=nothing, x_ub=nothing, basis=cdp.interp.basis)
+                 x_lb=nothing, x_ub=nothing)
 
 Construct a copy of `cdp`, optionally replacing selected model components.
 The `x_lb`/`x_ub` keywords replace the corresponding bound of a continuous
@@ -252,7 +301,7 @@ function ContinuousDP(cdp::ContinuousDP;
     actions = cdp.actions,
     x_lb = nothing,
     x_ub = nothing,
-    basis = cdp.interp.basis
+    basis = nothing
 )
     if x_lb !== nothing || x_ub !== nothing
         actions isa ContinuousActions || throw(ArgumentError(
@@ -262,7 +311,17 @@ function ContinuousDP(cdp::ContinuousDP;
             x_ub === nothing ? actions.x_ub : x_ub
         )
     end
-    return ContinuousDP(f, g, discount, shocks, weights, actions, basis)
+    out = ContinuousDP(f, g, discount, shocks, weights, actions)
+    if basis !== nothing
+        Base.depwarn(
+            "the `basis` keyword of the ContinuousDP copy constructor is " *
+            "deprecated: pass `CollocationSolver(basis)` to `solve` instead.",
+            :ContinuousDP)
+        return _with_interp(out, Interp(basis))
+    end
+    # Preserve an interp bound by the deprecated basis-endowed constructor
+    cdp.interp === nothing || return _with_interp(out, cdp.interp)
+    return out
 end
 
 
@@ -332,6 +391,18 @@ mutable struct CDPSolveResult{Algo<:DPAlgorithm,N,TCDP<:ContinuousDP{N},
 end
 
 Base.ndims(::ContinuousDP{N}) where {N} = N
+Base.ndims(::ContinuousDP{0}) = throw(ArgumentError(
+    "the state dimension of a primitives-only ContinuousDP is determined " *
+    "by the basis of the solver passed to `solve`"))
+
+# Bind an interpolation scheme to (a copy of) the problem's primitives.
+# Fully explicit type parameters: the implicit constructor cannot infer `N`
+# when `TI` is `Nothing`, so it is never relied upon here.
+_with_interp(cdp::ContinuousDP, interp::Interp{N}) where {N} =
+    ContinuousDP{N,typeof(cdp.f),typeof(cdp.g),typeof(cdp.shocks),
+                 typeof(cdp.actions),typeof(interp)}(
+        cdp.f, cdp.g, cdp.discount, cdp.shocks, cdp.weights, cdp.actions,
+        interp)
 
 # Derivative caches for gradient-based evaluation sweeps, or nothing when
 # the basis does not support them (then the derivative-free path is used)
@@ -1505,13 +1576,167 @@ function operator_iteration!(T::Function, C::TC, tol::Float64,
 end
 
 
+#= Solver types =#
+
+"""
+    CollocationSolver(basis; algorithm=PFI, inner_solver=:foc,
+                      tol=sqrt(eps()), max_iter=500)
+    CollocationSolver(; basis, algorithm=PFI, inner_solver=:foc,
+                      tol=sqrt(eps()), max_iter=500)
+
+Bellman equation collocation solver configuration for `solve`: the
+interpolation basis together with the algorithm parameters. The problem
+itself (a [`ContinuousDP`](@ref)) holds only the model primitives.
+
+# Arguments
+
+- `basis::Basis`: Object that contains the interpolation basis information;
+  its domain is the approximation domain of the value function.
+- `algorithm::Type{<:DPAlgorithm}`: `PFI` for policy function iteration or
+  `VFI` for value function iteration (for linear-quadratic approximation
+  see [`LQASolver`](@ref)).
+- `inner_solver::Symbol`: How to solve the inner maximization over actions.
+  `:foc` (default) solves the first-order condition by safeguarded
+  root-finding, warm-started across iterations, using the exact gradient of
+  the fitted value function and finite differences of `f` and `g`. It is
+  intended for smooth, effectively concave inner problems where the
+  first-order condition identifies the maximizing action: it falls back to
+  Brent maximization state-by-state when derivative evaluation is
+  unavailable or non-finite (and is used only for continuously
+  differentiable bases: any Chebyshev, or splines of degree >= 2), but it
+  does not attempt to detect nonconcavity or multiple stationary points.
+  Use `inner_solver=:brent` for the derivative-free path. The choice has
+  no effect for discrete action spaces (solved by exact enumeration), but
+  the value is still validated.
+- `tol::Real`: Convergence tolerance.
+- `max_iter::Integer`: Maximum number of iterations.
+"""
+struct CollocationSolver{Algo<:DPAlgorithm,TB<:Basis}
+    basis::TB
+    inner_solver::Symbol
+    tol::Float64
+    max_iter::Int
+
+    function CollocationSolver{Algo,TB}(basis, inner_solver, tol,
+                                        max_iter) where {Algo<:DPAlgorithm,
+                                                         TB<:Basis}
+        (Algo === PFI || Algo === VFI) || throw(ArgumentError(
+            "algorithm must be PFI or VFI; use LQASolver for " *
+            "linear-quadratic approximation"))
+        inner_solver in (:foc, :brent) ||
+            throw(ArgumentError("inner_solver must be :foc or :brent"))
+        return new{Algo,TB}(basis, inner_solver, Float64(tol), Int(max_iter))
+    end
+end
+
+CollocationSolver(basis::Basis;
+                  algorithm::Type{<:DPAlgorithm}=PFI,
+                  inner_solver::Symbol=:foc,
+                  tol::Real=sqrt(eps()), max_iter::Integer=500) =
+    CollocationSolver{algorithm,typeof(basis)}(basis, inner_solver, tol,
+                                               max_iter)
+
+CollocationSolver(; basis, kwargs...) = CollocationSolver(basis; kwargs...)
+
+"""
+    LQASolver(basis; point)
+    LQASolver(; basis, point)
+
+Linear-quadratic approximation solver configuration for `solve`: the model
+is approximated around the reference point `point = (s, x, e)` and the
+resulting LQ problem is solved exactly; the value function of the LQ
+solution is then represented in the interpolation `basis` (so the result
+has the same interface as a collocation solution).
+
+# Arguments
+
+- `basis::Basis`: Object that contains the interpolation basis information.
+- `point::Tuple`: The reference point `(s, x, e)` (typically a steady
+  state) around which the LQ approximation is constructed.
+"""
+struct LQASolver{TB<:Basis,
+                 TP<:Tuple{ScalarOrArray,ScalarOrArray,ScalarOrArray}}
+    basis::TB
+    point::TP
+end
+
+LQASolver(basis::Basis; point) = LQASolver(basis, point)
+LQASolver(; basis, point) = LQASolver(basis, point)
+
+
 #= Solve methods =#
+
+"""
+    solve(cdp, solver)
+
+Solve the continuous-state dynamic program `cdp` with the given solver
+configuration ([`CollocationSolver`](@ref) or [`LQASolver`](@ref)).
+
+# Arguments
+
+- `cdp::ContinuousDP`: The dynamic program to solve.
+- `solver`: Solver configuration.
+- `v_init::Vector{Float64}`: Optional keyword; initial value function values
+  at the interpolation nodes of `solver.basis`.
+- `verbose::Integer`: Optional keyword; level of feedback (0 for no output,
+  1 for warnings only, 2 for warnings and convergence messages during
+  iteration).
+- `print_skip::Integer`: Optional keyword; if `verbose == 2`, how many
+  iterations between print messages.
+
+# Returns
+
+- `res::CDPSolveResult`: Solution object of the dynamic program.
+"""
+function solve(cdp::ContinuousDP, solver::CollocationSolver{Algo};
+               v_init=nothing, verbose::Integer=2,
+               print_skip::Integer=50) where {Algo<:DPAlgorithm}
+    interp = Interp(solver.basis)
+    return _solve_core(_with_interp(cdp, interp), Algo,
+                       _check_v_init(v_init, interp),
+                       solver.tol, solver.max_iter, solver.inner_solver,
+                       verbose, print_skip)
+end
+
+function solve(cdp::ContinuousDP, solver::LQASolver;
+               v_init=nothing, verbose::Integer=2, print_skip::Integer=50)
+    interp = Interp(solver.basis)
+    return _solve_core(_with_interp(cdp, interp), LQA,
+                       _check_v_init(v_init, interp),
+                       sqrt(eps()), 500, :brent,
+                       verbose, print_skip; point=solver.point)
+end
+
+_check_v_init(::Nothing, interp::Interp) = zeros(interp.length)
+function _check_v_init(v_init::AbstractVector, interp::Interp)
+    length(v_init) == interp.length || throw(ArgumentError(
+        "length(v_init) = $(length(v_init)) does not match the number of " *
+        "interpolation nodes of the solver's basis ($(interp.length))"))
+    return convert(Vector{Float64}, v_init)
+end
+
+# Shared solve pipeline over a problem with a bound interpolation scheme
+function _solve_core(cdp::ContinuousDP{N}, ::Type{Algo},
+                     v_init::Vector{Float64}, tol::Float64, max_iter::Int,
+                     inner_solver::Symbol, verbose::Integer,
+                     print_skip::Integer;
+                     kwargs...) where {Algo<:DPAlgorithm,N}
+    res = CDPSolveResult{Algo,N}(cdp, tol, max_iter, inner_solver)
+    # LQA has no inner maximization: skip the FOC derivative caches
+    ws = CDPWorkspace(cdp; inner_solver=(Algo === LQA ? :brent : inner_solver))
+    ldiv!(res.C, cdp.interp.Phi_lu, v_init)
+    _solve!(cdp, res, ws, verbose, print_skip; kwargs...)
+    evaluate!(res, ws.fec)
+    return res
+end
 
 """
     solve(cdp, method=PFI; v_init=zeros(cdp.interp.length), tol=sqrt(eps()),
           max_iter=500, verbose=2, print_skip=50, kwargs...)
 
-Solve the continuous-state dynamic program by the specified method.
+Deprecated `solve` method for problems constructed with the deprecated
+basis-endowed `ContinuousDP` constructor. Use
+`solve(cdp, CollocationSolver(basis; ...))` (or `LQASolver`) instead.
 
 # Arguments
 
@@ -1528,19 +1753,7 @@ Solve the continuous-state dynamic program by the specified method.
 - `print_skip::Integer`: If `verbose == 2`, how many iterations between print
   messages.
 - `inner_solver::Symbol`: How to solve the inner maximization over actions
-  in VFI and PFI. `:foc` (default) solves the first-order condition by
-  safeguarded root-finding, warm-started across iterations, using the exact
-  gradient of the fitted value function and finite differences of `f` and
-  `g`. It is intended for smooth, effectively concave inner problems where
-  the first-order condition identifies the maximizing action: it falls
-  back to Brent maximization state-by-state when derivative evaluation is
-  unavailable or non-finite (and is used only for continuously
-  differentiable bases: any Chebyshev, or splines of degree >= 2), but it
-  does not attempt to detect nonconcavity or multiple stationary points.
-  Use `inner_solver=:brent` for the derivative-free path. The choice has
-  no effect for LQA (which has no inner maximization) or for discrete
-  action spaces (solved by exact enumeration), but the value is still
-  validated.
+  in VFI and PFI (`:foc` or `:brent`; see [`CollocationSolver`](@ref)).
 - `point::Tuple{ScalarOrArray, ScalarOrArray, ScalarOrArray}`: Keyword argument
   required when `method` is `LQA`. Specify the steady state `(s, x, e)` around
   which the LQ approximation is constructed.
@@ -1550,24 +1763,27 @@ Solve the continuous-state dynamic program by the specified method.
 - `res::CDPSolveResult`: Solution object of the dynamic program.
 """
 function solve(cdp::ContinuousDP{N}, method::Type{Algo}=PFI;
-               v_init::Vector{Float64}=zeros(cdp.interp.length),
+               v_init=nothing,
                tol::Real=sqrt(eps()), max_iter::Integer=500,
                verbose::Integer=2,
                print_skip::Integer=50,
                inner_solver::Symbol=:foc,
                kwargs...) where {Algo<:DPAlgorithm,N}
-    tol = Float64(tol)
-    # Validate before the LQA override below, so that an invalid value is
-    # rejected for every method, as documented
+    cdp.interp === nothing && throw(ArgumentError(
+        "this ContinuousDP holds no interpolation basis; pass a solver, " *
+        "e.g. `solve(cdp, CollocationSolver(basis))`"))
+    Base.depwarn(
+        "`solve(cdp, method; ...)` with the basis stored in the problem is " *
+        "deprecated: construct the problem without `basis` and call " *
+        "`solve(cdp, CollocationSolver(basis; algorithm=$Algo, ...))` " *
+        "(or `solve(cdp, LQASolver(basis; point=point))` for LQA).", :solve)
+    # Validate before the LQA override in _solve_core, so that an invalid
+    # value is rejected for every method, as documented
     inner_solver in (:foc, :brent) ||
         throw(ArgumentError("inner_solver must be :foc or :brent"))
-    res = CDPSolveResult{Algo,N}(cdp, tol, max_iter, inner_solver)
-    # LQA has no inner maximization: skip the FOC derivative caches
-    ws = CDPWorkspace(cdp; inner_solver=(Algo === LQA ? :brent : inner_solver))
-    ldiv!(res.C, cdp.interp.Phi_lu, v_init)
-    _solve!(cdp, res, ws, verbose, print_skip; kwargs...)
-    evaluate!(res, ws.fec)
-    return res
+    return _solve_core(cdp, Algo, _check_v_init(v_init, cdp.interp),
+                       Float64(tol), Int(max_iter), inner_solver,
+                       verbose, print_skip; kwargs...)
 end
 
 
