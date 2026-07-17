@@ -75,8 +75,9 @@ reach through `res.cdp.interp` — consume only the public surface of `CDPSolveR
 3. ~~Docs sync~~ DONE: README, `docs/src/index.md`, `docs/src/api.md`, and the
    optgrowth notebook present the keyword constructor + solver types. Checked
    2026-07-17: `cdp_ex_MF_jl.ipynb` uses the deprecated 8-arg constructor 4 times
-   (`lqapprox_jl.ipynb` is clean). Decided (tentatively): update the MF notebook
-   in PR A.
+   (`lqapprox_jl.ipynb` is clean). Decided 2026-07-17: the MF notebook update
+   goes in a follow-up PR, not PR A (fine within the deprecation window: the
+   old form warns but works until v0.4).
 4. ~~Benchmarks~~ DONE: solves via `CollocationSolver` (end-to-end timings now include
    per-solve `Interp` construction — expect a small constant addition on `solve_*`
    keys in the judge report), kernels via `_with_interp`.
