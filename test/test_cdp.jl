@@ -10,6 +10,9 @@
         x_lb(s) = 0
         x_ub(s) = s
 
+        cdp = ContinuousDP(f=f, g=g, discount=beta, shocks=shocks,
+                           weights=weights, x_lb=x_lb, x_ub=x_ub)
+
         # Analytical solution
         ab = alpha * beta
         c1 = (log(1 - ab) + log(ab) * ab / (1 - ab)) / (1 - beta)
@@ -46,18 +49,18 @@
         basis_labels = ["Chebyshev", "Spline"]
 
         for (basis, label) in zip(bases, basis_labels)
-            cdp = ContinuousDP(f, g, beta, shocks, weights, x_lb, x_ub, basis)
-
             for method in methods
                 @testset "Test $method with $label basis" begin
                     # solve
                     tol = sqrt(eps())
                     max_iter = 500
-                    res = @inferred(solve(cdp, method, tol=tol, max_iter=max_iter))
+                    solver = CollocationSolver(basis; algorithm=method,
+                                               tol=tol, max_iter=max_iter)
+                    res = @inferred(solve(cdp, solver))
 
                     rtol = 1e-5
-                    @test isapprox(res.V, v_star.(cdp.interp.S); rtol=rtol)
-                    @test isapprox(res.X, x_star.(cdp.interp.S); rtol=rtol)
+                    @test isapprox(res.V, v_star.(res.eval_nodes); rtol=rtol)
+                    @test isapprox(res.X, x_star.(res.eval_nodes); rtol=rtol)
 
                     # set_eval_nodes!
                     grid_size = 200
@@ -74,53 +77,24 @@
             end
         end
 
-        @testset "Test ContinuousDP copy constructor" begin
-            cdp1 = ContinuousDP(
-                f, g, beta, shocks, weights, x_lb, x_ub, bases[1]
-            )
-
-            cdp2 = @inferred ContinuousDP(cdp1)
-            @test ndims(cdp2) == ndims(cdp1)
-            @test cdp2.discount == cdp1.discount
-            @test cdp2.shocks == cdp1.shocks
-            @test cdp2.weights == cdp1.weights
-            @test cdp2.interp.length == cdp1.interp.length
-            @test cdp2.interp.S == cdp1.interp.S
-
-            beta2 = 0.98
-            cdp3 = @inferred ContinuousDP(cdp1; discount=beta2, basis=bases[2])
-            @test cdp3.discount == beta2
-            @test ndims(cdp3) == ndims(cdp1)
-            @test cdp3.shocks == cdp1.shocks
-            @test cdp3.weights == cdp1.weights
-            @test cdp3.interp.length == length(bases[2])
-        end
-
         @testset "Test warning" begin
-            cdp = ContinuousDP(
-                f, g, beta, shocks, weights, x_lb, x_ub, bases[1]
-            )
             for max_iter in [0, 1]
-                @test_logs (:warn, r".*max_iter.*")
-                           solve(cdp, max_iter=max_iter)
+                solver = CollocationSolver(bases[1]; max_iter=max_iter)
+                @test_logs (:warn, r".*max_iter.*") solve(cdp, solver;
+                                                          verbose=1)
            end
         end
 
         @testset "Test type inference" begin
-            interp_fact(cdp) = cdp.interp.Phi_lu
+            interp_fact(res) = res.cdp.interp.Phi_lu
             transition_fun(res) = res.cdp.g
-            interp_basis(cdp) = cdp.interp.basis
+            interp_basis(res) = res.cdp.interp.basis
 
-            cdp = ContinuousDP(
-                f, g, beta, shocks, weights, x_lb, x_ub, bases[1]
-            )
+            res = @inferred solve(cdp, CollocationSolver(bases[1]))
 
-            @inferred interp_fact(cdp)
-
-            res = @inferred solve(cdp)
-
+            @inferred interp_fact(res)
             @inferred transition_fun(res)
-            @inferred interp_basis(cdp)
+            @inferred interp_basis(res)
         end
     end
 
@@ -163,13 +137,14 @@
         shocks = [0.]
         weights = [1.]
 
-        cdp = ContinuousDP(f, g, discount, shocks, weights, x_lb, x_ub, basis)
+        cdp = ContinuousDP(f=f, g=g, discount=discount, shocks=shocks,
+                           weights=weights, x_lb=x_lb, x_ub=x_ub)
 
-        res_lqa = @inferred(solve(cdp, LQA, point=point));
+        res_lqa = @inferred(solve(cdp, LQASolver(basis; point=point)));
         rtol = 1e-2
 
-        @test isapprox(res_lqa.V, v_star.(cdp.interp.S); rtol=rtol)
-        @test isapprox(res_lqa.X, x_star.(cdp.interp.S); rtol=rtol)
+        @test isapprox(res_lqa.V, v_star.(res_lqa.eval_nodes); rtol=rtol)
+        @test isapprox(res_lqa.X, x_star.(res_lqa.eval_nodes); rtol=rtol)
 
     end
 
@@ -193,11 +168,13 @@
         x_lb(s) = 0
         x_ub(s) = 0.99 * s;
 
-        cdp = ContinuousDP(f, g, discount, shocks, weights, x_lb, x_ub, basis)
+        cdp = ContinuousDP(f=f, g=g, discount=discount, shocks=shocks,
+                           weights=weights, x_lb=x_lb, x_ub=x_ub)
 
         # Compute coefficients once
         v_init = π * ones(n)
-        res = solve(cdp, v_init=v_init, max_iter=0)
+        res = solve(cdp, CollocationSolver(basis; max_iter=0); v_init=v_init,
+                    verbose=0)
 
         # Basis is identity matrix
         @test isapprox(res.C, v_init)

@@ -23,8 +23,8 @@ end
     g(s, x, e) = clamp(e * s^0.65 - x, 0.5, 2.0)
     shocks, weights = qnwnorm(5, 1.0, 0.01)
     basis = Basis(ChebParams(20, 0.5, 2.0))
-    cdp = ContinuousDP(f, g, 0.95, shocks, weights, s -> 1e-8, s -> s, basis)
-    res = solve(cdp, PFI, verbose=0)
+    cdp = ContinuousDP(f, g, 0.95, shocks, weights, s -> 1e-8, s -> s)
+    res = solve(cdp, CollocationSolver(basis), verbose=0)
 
     # Same-length evaluation nodes: the result arrays are reused in place
     grid1 = collect(range(0.5, 2.0, length=100))
@@ -54,12 +54,15 @@ end
     g(s, x, e) = e * s^0.65 - x
     shocks, weights = qnwnorm(5, 1.0, 0.01)
     basis = Basis(ChebParams(20, 0.5, 2.0))
-    cdp = ContinuousDP(f, g, beta, shocks, weights, s -> 1e-8, s -> s, basis)
+    cdp = ContinuousDP(f, g, beta, shocks, weights, s -> 1e-8, s -> s)
 
-    res = solve(cdp, PFI, verbose=0)
+    res = solve(cdp, CollocationSolver(basis), verbose=0)
+    # Internal operators work on a problem with a bound interpolation
+    # scheme; the result stores one
+    bcdp = res.cdp
     C0 = copy(res.C)
-    n = cdp.interp.length
-    ws = CDPWorkspace(cdp, inner_solver=:brent)
+    n = bcdp.interp.length
+    ws = CDPWorkspace(bcdp, inner_solver=:brent)
 
     @test length(ws.Tv) == n
     @test length(ws.X) == n
@@ -67,11 +70,11 @@ end
     # Workspace-based operators (with the Brent inner solver) agree with the
     # buffer-based ones
     Tv = Vector{Float64}(undef, n)
-    @test bellman_operator!(cdp, copy(C0), ws) ==
-          bellman_operator!(cdp, copy(C0), Tv)
+    @test bellman_operator!(bcdp, copy(C0), ws) ==
+          bellman_operator!(bcdp, copy(C0), Tv)
 
     X = Vector{Float64}(undef, n)
-    @test policy_iteration_operator!(cdp, copy(C0), ws) ==
-          policy_iteration_operator!(cdp, copy(C0), X)
+    @test policy_iteration_operator!(bcdp, copy(C0), ws) ==
+          policy_iteration_operator!(bcdp, copy(C0), X)
     @test ws.X == X
 end

@@ -58,9 +58,11 @@ using ContinuousDPs: CDPWorkspace
     basis = Basis(SplineParams(nk - 1, k_min, k_max, dk),
                   SplineParams(nlogz - 1, logz_min, logz_max, dz))
     actions = ContinuousActions{2}(x_lb2, x_ub2)
-    cdp2 = ContinuousDP(f2c, g2c, beta, shocks, weights, actions, basis)
+    cdp2 = ContinuousDP(f2c, g2c, beta, shocks, weights, actions)
+    # Bound instance for tests of internal functions
+    cdp2b = ContinuousDPs._with_interp(cdp2, ContinuousDPs.Interp(basis))
 
-    S = cdp2.interp.S
+    S = nodes(basis)[1]
     v_star_on_S = v_star.(view(S, :, 1), view(S, :, 2))
     kp_star_on_S = kp_star.(view(S, :, 1), view(S, :, 2))
 
@@ -70,11 +72,13 @@ using ContinuousDPs: CDPWorkspace
     # without adding coverage
     @testset "solve: $method, $solver" for (method, solver) in
             ((PFI, :foc), (PFI, :brent), (VFI, :foc))
-        res = solve(cdp2, method, verbose=0, max_iter=500,
-                    inner_solver=solver)
+        res = solve(cdp2, CollocationSolver(basis; algorithm=method,
+                                            max_iter=500,
+                                            inner_solver=solver),
+                    verbose=0)
         @test res.converged
         @test res.X isa Matrix{Float64}
-        @test size(res.X) == (cdp2.interp.length, 2)
+        @test size(res.X) == (size(S, 1), 2)
         @test isempty(res.X_ind)
         # Value and policy against the analytical solution. :foc
         # tolerances are in line with the one-control spline case in
@@ -110,9 +114,9 @@ using ContinuousDPs: CDPWorkspace
             return (kp, rho * logz + e)
         end
         cdp1 = ContinuousDP(f1c, g1c, beta, shocks, weights,
-                            s -> 1e-10, s -> 1 - 1e-10, basis)
-        res1 = solve(cdp1, PFI, verbose=0)
-        res2 = solve(cdp2, PFI, verbose=0)
+                            s -> 1e-10, s -> 1 - 1e-10)
+        res1 = solve(cdp1, CollocationSolver(basis), verbose=0)
+        res2 = solve(cdp2, CollocationSolver(basis), verbose=0)
         # Same model, two formulations: the value functions must agree to
         # solver precision (approximation error is common to both)
         @test maximum(abs, res1.V .- res2.V) < 1e-4
@@ -120,15 +124,15 @@ using ContinuousDPs: CDPWorkspace
     end
 
     @testset "workspace containers and warm starts" begin
-        ws = CDPWorkspace(cdp2)
+        ws = CDPWorkspace(cdp2b)
         @test ws.X isa Matrix{Float64}
-        @test size(ws.X) == (cdp2.interp.length, 2)
+        @test size(ws.X) == (size(S, 1), 2)
         @test all(isnan, ws.X)
         @test ws.dfecs !== nothing
     end
 
     @testset "set_eval_nodes! and callable interface" begin
-        res = solve(cdp2, PFI, verbose=0)
+        res = solve(cdp2, CollocationSolver(basis), verbose=0)
         k_grid = collect(range(k_min, k_max, length=15))
         logz_grid = collect(range(logz_min, logz_max, length=5))
         set_eval_nodes!(res, k_grid, logz_grid)
@@ -139,7 +143,7 @@ using ContinuousDPs: CDPWorkspace
     end
 
     @testset "simulate" begin
-        res = solve(cdp2, PFI, verbose=0)
+        res = solve(cdp2, CollocationSolver(basis), verbose=0)
         s_path = simulate(res, [1.0, 0.0], 30)
         @test all(k_min .<= view(s_path, 1, :) .<= k_max)
         @test all(logz_min .<= view(s_path, 2, :) .<= logz_max)
@@ -148,13 +152,14 @@ using ContinuousDPs: CDPWorkspace
     @testset "inner_solver=:brent is respected in re-evaluation" begin
         # A :brent solve must not have its policy recomputed through the
         # derivative-based path by evaluate!/set_eval_nodes!/the callable
-        res_b = solve(cdp2, PFI, verbose=0, inner_solver=:brent)
+        res_b = solve(cdp2, CollocationSolver(basis; inner_solver=:brent),
+                      verbose=0)
         @test res_b.inner_solver == :brent
         # res.X rows must equal a direct derivative-free recomputation
-        fec = ContinuousDPs.FunEvalCache(cdp2.interp.basis)
+        fec = ContinuousDPs.FunEvalCache(basis)
         for i in (1, 40, 100)
             xout = fill(NaN, 2)
-            ContinuousDPs._s_wise_max_multi!(cdp2, cdp2.interp.S[i, :],
+            ContinuousDPs._s_wise_max_multi!(cdp2b, S[i, :],
                                              res_b.C, fec, nothing, xout,
                                              false)
             @test xout == res_b.X[i, :]
@@ -174,9 +179,11 @@ using ContinuousDPs: CDPWorkspace
 
     @testset "bound validation" begin
         bad1 = ContinuousDP(cdp2; x_lb=s -> (1e-4,))  # wrong length
-        @test_throws ArgumentError solve(bad1, PFI, verbose=0)
+        @test_throws ArgumentError solve(bad1, CollocationSolver(basis),
+                                         verbose=0)
         bad2 = ContinuousDP(cdp2; x_lb=s -> (NaN, k_min))  # non-finite
-        @test_throws ArgumentError solve(bad2, PFI, verbose=0)
+        @test_throws ArgumentError solve(bad2, CollocationSolver(basis),
+                                         verbose=0)
     end
 
     @testset "construction" begin

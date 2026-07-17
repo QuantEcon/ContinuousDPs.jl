@@ -137,26 +137,29 @@
     ),
     ] 
 
+    # Build DP (primitives only; the basis belongs to the solver)
+    cdp = ContinuousDP(f=f, g=g, discount=beta, shocks=shocks,
+                       weights=weights, x_lb=x_lb, x_ub=x_ub)
+
     for (basis_label, basis, policy_tol, value_tol) in basis_configs
         @testset "$basis_label Basis with Multiple Methods" begin
-
-            # Build DP
-            cdp = ContinuousDP(f, g, beta, shocks, weights, x_lb, x_ub, basis)
-            @test ndims(cdp) == 2
 
             for method in [VFI, PFI]
                 test_name = "$method + $basis_label"
 
                 # Analytical targets on interpolation nodes
-                S = cdp.interp.S
+                S = nodes(basis)[1]
                 k_nodes = @view S[:, 1]
                 logz_nodes = @view S[:, 2]
                 v_star_on_S = v_star.(k_nodes, logz_nodes)
                 k_prime_star_on_S = policy.(k_nodes, logz_nodes)
 
                 # Solve DP
-                res = @inferred solve(cdp, method, max_iter=500, tol=sqrt(eps()), verbose=0)
+                solver = CollocationSolver(basis; algorithm=method,
+                                           max_iter=500, tol=sqrt(eps()))
+                res = @inferred solve(cdp, solver, verbose=0)
                 @test ndims(res) == 2
+                @test ndims(res.cdp) == 2
 
                 results[test_name] = res
                 x_hat = vec(res.X)
@@ -177,7 +180,7 @@
                 @test_nowarn set_eval_nodes!(res, k_grid, logz_grid)
             end
 
-            res = solve(cdp, verbose=0)
+            res = solve(cdp, CollocationSolver(basis), verbose=0)
 
             # Test set_eval_nodes! for NTuple{N,AbstractVector}
             k_grid = range(k_min, k_max, length=15)

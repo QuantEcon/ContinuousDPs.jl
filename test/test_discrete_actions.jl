@@ -16,14 +16,17 @@ using ContinuousDPs: CDPWorkspace, FunEvalCache, _s_wise_max_discrete!
     x_grid = collect(range(1e-3, s_max^alpha, length=501))
 
     cdp_d = ContinuousDP(f_growth, g_growth, beta, shocks, weights,
-                         DiscreteActions(x_grid), basis)
+                         DiscreteActions(x_grid))
     cdp_c = ContinuousDP(f_growth, g_growth, beta, shocks, weights,
-                         s -> 1e-3, s -> s^alpha - s_min, basis)
+                         s -> 1e-3, s -> s^alpha - s_min)
+    # Bound instance for tests of internal functions
+    cdp_d_b = ContinuousDPs._with_interp(cdp_d, ContinuousDPs.Interp(basis))
 
     @testset "solve and compare with the continuous solution: $method" for
             method in (PFI, VFI)
-        res_d = solve(cdp_d, method, verbose=0)
-        res_c = solve(cdp_c, method, verbose=0)
+        solver = CollocationSolver(basis; algorithm=method)
+        res_d = solve(cdp_d, solver, verbose=0)
+        res_c = solve(cdp_c, solver, verbose=0)
         @test res_d.converged
         # Action-grid spacing h ~ 3.5e-3: value error is O(h) here (the
         # policy is off by O(h), and V is evaluated along the discrete
@@ -37,7 +40,7 @@ using ContinuousDPs: CDPWorkspace, FunEvalCache, _s_wise_max_discrete!
     end
 
     @testset "enumeration agrees with a brute-force reference" begin
-        res = solve(cdp_d, PFI, verbose=0)
+        res = solve(cdp_d, CollocationSolver(basis), verbose=0)
         C = res.C
         fec = FunEvalCache(basis)
         for s in (s_min, 0.7, 1.3, s_max)
@@ -56,14 +59,14 @@ using ContinuousDPs: CDPWorkspace, FunEvalCache, _s_wise_max_discrete!
     end
 
     @testset "workspace and warm-start containers" begin
-        ws = CDPWorkspace(cdp_d)
+        ws = CDPWorkspace(cdp_d_b)
         @test ws.dfecs === nothing        # no FOC machinery for discrete
-        @test length(ws.X_ind) == cdp_d.interp.length
+        @test length(ws.X_ind) == cdp_d_b.interp.length
         @test isempty(ws.X)
     end
 
     @testset "set_eval_nodes! and callable interface" begin
-        res = solve(cdp_d, PFI, verbose=0)
+        res = solve(cdp_d, CollocationSolver(basis), verbose=0)
         grid = collect(range(s_min, s_max, length=100))
         set_eval_nodes!(res, grid)
         @test length(res.X) == length(res.X_ind) == 100
@@ -75,7 +78,7 @@ using ContinuousDPs: CDPWorkspace, FunEvalCache, _s_wise_max_discrete!
     end
 
     @testset "simulate uses exact greedy actions" begin
-        res = solve(cdp_d, PFI, verbose=0)
+        res = solve(cdp_d, CollocationSolver(basis), verbose=0)
         s_path = simulate(res, 1.0, 30)
         @test all(s_min .<= s_path .<= s_max)
     end
@@ -86,9 +89,8 @@ using ContinuousDPs: CDPWorkspace, FunEvalCache, _s_wise_max_discrete!
         f2(s, x) = x == :save ? log(0.5 * s) : log(s)
         g2(s, x, e) = clamp(0.5 * s + moves[x], s_min, s_max)
         cdp2 = ContinuousDP(f2, g2, beta, shocks, weights,
-                            DiscreteActions([:stay, :save]),
-                            Basis(ChebParams(15, s_min, s_max)))
-        res2 = solve(cdp2, PFI, verbose=0)
+                            DiscreteActions([:stay, :save]))
+        res2 = solve(cdp2, CollocationSolver(Basis(ChebParams(15, s_min, s_max))), verbose=0)
         @test res2.converged
         @test eltype(res2.X) == Symbol
         @test all(x -> x in (:stay, :save), res2.X)
@@ -96,19 +98,19 @@ using ContinuousDPs: CDPWorkspace, FunEvalCache, _s_wise_max_discrete!
     end
 
     @testset "legacy bellman_operator! overload supports discrete actions" begin
-        res = solve(cdp_d, PFI, verbose=0)
+        res = solve(cdp_d, CollocationSolver(basis), verbose=0)
         C0 = copy(res.C)
-        n = cdp_d.interp.length
-        ws = CDPWorkspace(cdp_d)
+        n = cdp_d_b.interp.length
+        ws = CDPWorkspace(cdp_d_b)
         Tv = Vector{Float64}(undef, n)
-        @test ContinuousDPs.bellman_operator!(cdp_d, copy(C0), Tv) ==
-              ContinuousDPs.bellman_operator!(cdp_d, copy(C0), ws)
+        @test ContinuousDPs.bellman_operator!(cdp_d_b, copy(C0), Tv) ==
+              ContinuousDPs.bellman_operator!(cdp_d_b, copy(C0), ws)
     end
 
     @testset "continuous action spaces: backward-compatible containers" begin
-        # The legacy constructor path must keep the pre-ActionSpace
+        # The x_lb/x_ub constructor path must keep the pre-ActionSpace
         # container types (regression tripwire for #88)
-        res_c = solve(cdp_c, PFI, verbose=0)
+        res_c = solve(cdp_c, CollocationSolver(basis), verbose=0)
         @test res_c.X isa Vector{Float64}
         @test isempty(res_c.X_ind)
         @test cdp_c.actions isa ContinuousActions{1}
@@ -119,15 +121,11 @@ using ContinuousDPs: CDPWorkspace, FunEvalCache, _s_wise_max_discrete!
         @test cdp3.actions === cdp_d.actions
         @test_throws ArgumentError ContinuousDP(cdp_d; x_lb=s -> 0.0)
         @test_throws ArgumentError DiscreteActions(Float64[])
-        @test_throws ArgumentError solve(cdp_d, LQA, verbose=0,
-                                         point=(1.0, 0.5, 1.0))
-        # inner_solver has no effect for discrete actions or LQA but is
-        # validated in both cases
-        @test_throws ArgumentError solve(cdp_d, PFI, verbose=0,
-                                         inner_solver=:bogus)
-        @test_throws ArgumentError solve(cdp_c, LQA, verbose=0,
-                                         inner_solver=:bogus,
-                                         point=(1.0, 0.5, 1.0))
+        @test_throws ArgumentError solve(
+            cdp_d, LQASolver(basis; point=(1.0, 0.5, 1.0)), verbose=0)
+        # inner_solver is validated at solver construction
+        @test_throws ArgumentError CollocationSolver(basis;
+                                                     inner_solver=:bogus)
         # the action dimension must be a positive integer
         lb1(s) = 0.0
         ub1(s) = 1.0
