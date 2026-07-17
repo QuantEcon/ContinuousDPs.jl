@@ -71,9 +71,10 @@ reach through `res.cdp.interp` — consume only the public surface of `CDPSolveR
 2. ~~Migrate existing tests~~ DONE: all files construct primitives-only problems;
    internal-function tests bind via `_with_interp`. Full suite green (842 tests).
 3. ~~Docs sync~~ DONE: README, `docs/src/index.md`, `docs/src/api.md`, and the
-   optgrowth notebook present the keyword constructor + solver types. The MF and
-   lqapprox notebooks were NOT touched (not part of the synchronized triple) — check
-   them before release and update if they construct `ContinuousDP` with a basis.
+   optgrowth notebook present the keyword constructor + solver types. Checked
+   2026-07-17: `cdp_ex_MF_jl.ipynb` uses the deprecated 8-arg constructor 4 times
+   (`lqapprox_jl.ipynb` is clean). Decided (tentatively): update the MF notebook
+   in PR A.
 4. ~~Benchmarks~~ DONE: solves via `CollocationSolver` (end-to-end timings now include
    per-solve `Interp` construction — expect a small constant addition on `solve_*`
    keys in the judge report), kernels via `_with_interp`.
@@ -95,18 +96,49 @@ reach through `res.cdp.interp` — consume only the public surface of `CDPSolveR
    NOTE: PkgBenchmark cannot run in the working repo (LibGit2 chokes on
    `.claude/worktrees/`); run it from a clean clone.
 7. When the PR is complete: delete this file AND remove it from the git history.
-   Removing it from history is possible and reasonable as long as it happens *before*
-   the branch lands on `main`:
-   - Easiest: **squash-merge the PR** after deleting the file in a final commit — the
-     squashed commit's tree is all that reaches `main`, so the file and the
-     intermediate commits never enter `main`'s history. No history surgery needed.
-   - If a merge-commit/rebase-merge workflow is preferred: rewrite the branch first,
-     e.g. `git rebase -i main` dropping the file from each commit, or
-     `git filter-repo --invert-paths --path NOTES-PR-A.md --refs collocation-solver`.
-     Safe now (the branch has not been pushed); after pushing, it just needs a
-     force-push to the PR branch (normal for PR branches).
-   - NOT reasonable after merge: that would mean rewriting `main` and force-pushing a
-     shared branch. If the file ever lands on `main`, leave it and just delete it.
+   DECIDED (2026-07-17): **history rewrite + force-push**, deferred to the last
+   minute before merge — e.g. `git rebase -i main` dropping the file from each
+   commit, or
+   `git filter-repo --invert-paths --path NOTES-PR-A.md --refs collocation-solver`.
+   The branch is already pushed, so this needs a force-push to the PR branch
+   (normal for PR branches). (Squash-merge would also keep the file out of
+   `main`'s history, but the rewrite route was preferred.)
+   NOT reasonable after merge: that would mean rewriting `main` and force-pushing a
+   shared branch. If the file ever lands on `main`, leave it and just delete it.
+
+## Decisions from the 2026-07-17 review session (PR B-facing; none change PR A code)
+
+- **Point-evaluation API (for PR B's `CollocationPolicy`): functor types**
+  `ValueFunction(res)` and `PolicyFunction(res)` — small structs holding
+  preallocated caches, callable as `(vf::ValueFunction)(s)` / `(pf::PolicyFunction)(s)`.
+  Unexported (semi-public, documented). Semantics: `ValueFunction` evaluates the
+  fitted V via `funeval_point!(fec, res.C, s)`; `PolicyFunction` is exact greedy
+  for discrete actions and interpolate-and-clamp for continuous actions —
+  exactly the policy closure `simulate!` builds internally today, factored out
+  (`simulate!` then constructs a `PolicyFunction`; existing simulation tests
+  validate the refactor). Refinement: evaluate the policy interpolant via a
+  second `FunEvalCache` (the point kernels support `LinParams`) instead of
+  `Interpoland`, making both functors allocation-free per call; `simulate!`
+  inherits the speedup. Thread-safety caveat as `CDPWorkspace` (one per thread).
+  **Lands in PR B** (non-breaking 0.3.x addition), not PR A. Rationale: cheap
+  per-step `action`/`value` for POMDPs rollouts without reaching through
+  `res.cdp.interp`; alternatives (per-call use of the `res(s_nodes)` callable —
+  2-3 orders of magnitude slower; keyword modes on the callable; exposing raw
+  kernels) rejected. Future option on `PolicyFunction`: exact-greedy mode for
+  continuous actions via a constructor keyword.
+- **`CDPMDP` typing for discrete actions** (Float64-only vs parametric action
+  type): postponed to PR B.
+- **`POMDPs.initialstate`**: leave undefined when not supplied (simulators take
+  explicit starts); open to a later change.
+- **PR B docs caveat wording**: ContinuousDPs extends `QuantEcon.solve` (it does
+  not own `solve`), so the name-clash caveat is `QuantEcon.solve` vs
+  `POMDPs.solve`; the clash predates this package pair. Also: with dual-trigger
+  weakdeps `[POMDPs, POMDPTools]`, the `as_mdp` MethodError hint must name both
+  packages.
+- **PR C mechanism** (explicit-finite contract vs `weighted_iterator`-consuming
+  kernel refactor): left open.
+- **Housekeeping** (post design comment to #89, cross-ref on #8, note on
+  QuantEcon/QuantEcon.jl#398): deferred.
 
 ## Environment note
 
