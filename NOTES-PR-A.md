@@ -82,8 +82,19 @@ reach through `res.cdp.interp` — consume only the public surface of `CDPSolveR
 6. **`PkgBenchmark.judge` vs `main`**: launched; report at
    `scratchpad/judge_report.md` (re-run if lost: `judge(path, "collocation-solver",
    "main")` with PkgBenchmark in a temp env). Paste the table into the PR body.
-7. Delete this file before merge; open the PR with `Closes #8` and a deprecation
-   summary.
+7. When the PR is complete: delete this file AND remove it from the git history.
+   Removing it from history is possible and reasonable as long as it happens *before*
+   the branch lands on `main`:
+   - Easiest: **squash-merge the PR** after deleting the file in a final commit — the
+     squashed commit's tree is all that reaches `main`, so the file and the
+     intermediate commits never enter `main`'s history. No history surgery needed.
+   - If a merge-commit/rebase-merge workflow is preferred: rewrite the branch first,
+     e.g. `git rebase -i main` dropping the file from each commit, or
+     `git filter-repo --invert-paths --path NOTES-PR-A.md --refs collocation-solver`.
+     Safe now (the branch has not been pushed); after pushing, it just needs a
+     force-push to the PR branch (normal for PR branches).
+   - NOT reasonable after merge: that would mean rewriting `main` and force-pushing a
+     shared branch. If the file ever lands on `main`, leave it and just delete it.
 
 ## Environment note
 
