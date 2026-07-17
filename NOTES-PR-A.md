@@ -77,7 +77,8 @@ reach through `res.cdp.interp` — consume only the public surface of `CDPSolveR
 4. ~~Benchmarks~~ DONE: solves via `CollocationSolver` (end-to-end timings now include
    per-solve `Interp` construction — expect a small constant addition on `solve_*`
    keys in the judge report), kernels via `_with_interp`.
-5. ~~Version bump~~ DONE: 0.3.0. Release notes go in the PR body.
+5. Version stays 0.2.1 in this PR (per review): the 0.3.0 bump happens in a separate
+   release PR. Release notes go there.
 6. **`PkgBenchmark.judge` vs `main`**: launched; report at
    `scratchpad/judge_report.md` (re-run if lost: `judge(path, "collocation-solver",
    "main")` with PkgBenchmark in a temp env). Paste the table into the PR body.
