@@ -20,7 +20,7 @@ using ContinuousDPs: CDPWorkspace, FunEvalCache, _s_wise_max_discrete!
     cdp_c = ContinuousDP(f_growth, g_growth, beta, shocks, weights,
                          s -> 1e-3, s -> s^alpha - s_min)
     # Bound instance for tests of internal functions
-    cdp_d_b = ContinuousDPs._with_interp(cdp_d, ContinuousDPs.Interp(basis))
+    colloc_cdp_d = ContinuousDPs._with_interp(cdp_d, ContinuousDPs.Interp(basis))
 
     @testset "solve and compare with the continuous solution: $method" for
             method in (PFI, VFI)
@@ -59,9 +59,9 @@ using ContinuousDPs: CDPWorkspace, FunEvalCache, _s_wise_max_discrete!
     end
 
     @testset "workspace and warm-start containers" begin
-        ws = CDPWorkspace(cdp_d_b)
+        ws = CDPWorkspace(colloc_cdp_d)
         @test ws.dfecs === nothing        # no FOC machinery for discrete
-        @test length(ws.X_ind) == cdp_d_b.interp.length
+        @test length(ws.X_ind) == colloc_cdp_d.interp.length
         @test isempty(ws.X)
     end
 
@@ -100,11 +100,11 @@ using ContinuousDPs: CDPWorkspace, FunEvalCache, _s_wise_max_discrete!
     @testset "legacy bellman_operator! overload supports discrete actions" begin
         res = solve(cdp_d, CollocationSolver(basis), verbose=0)
         C0 = copy(res.C)
-        n = cdp_d_b.interp.length
-        ws = CDPWorkspace(cdp_d_b)
+        n = colloc_cdp_d.interp.length
+        ws = CDPWorkspace(colloc_cdp_d)
         Tv = Vector{Float64}(undef, n)
-        @test ContinuousDPs.bellman_operator!(cdp_d_b, copy(C0), Tv) ==
-              ContinuousDPs.bellman_operator!(cdp_d_b, copy(C0), ws)
+        @test ContinuousDPs.bellman_operator!(colloc_cdp_d, copy(C0), Tv) ==
+              ContinuousDPs.bellman_operator!(colloc_cdp_d, copy(C0), ws)
     end
 
     @testset "continuous action spaces: backward-compatible containers" begin

@@ -131,30 +131,30 @@ for (label, cdp, basis) in cases
     # the internal operators work on a problem with a bound interpolation
     # scheme
     res = solve(cdp, solver_pfi; verbose=0)
-    bcdp = _with_interp(cdp, Interp(basis))
+    colloc_cdp = _with_interp(cdp, Interp(basis))
     C0 = copy(res.C)
     X0 = copy(res.X)
-    n = bcdp.interp.length
-    N = ndims(bcdp)
+    n = colloc_cdp.interp.length
+    N = ndims(colloc_cdp)
 
     # Per-state optimization kernel (#73)
-    s_mid = N == 1 ? bcdp.interp.S[div(n, 2)] : bcdp.interp.S[div(n, 2), :]
-    fec = FunEvalCache(bcdp.interp.basis)
+    s_mid = N == 1 ? colloc_cdp.interp.S[div(n, 2)] : colloc_cdp.interp.S[div(n, 2), :]
+    fec = FunEvalCache(colloc_cdp.interp.basis)
     grp["s_wise_max_one_state"] =
-        @benchmarkable _s_wise_max!($bcdp, $s_mid, $C0, $fec)
+        @benchmarkable _s_wise_max!($colloc_cdp, $s_mid, $C0, $fec)
 
     # State loops over the kernel, using a preallocated workspace
-    ws = CDPWorkspace(bcdp)
+    ws = CDPWorkspace(colloc_cdp)
     grp["bellman_operator"] = @benchmarkable bellman_operator!(
-        $bcdp, C, $ws
+        $colloc_cdp, C, $ws
     ) setup = (C = copy($C0)) evals = 1
     grp["compute_greedy"] = @benchmarkable compute_greedy!(
-        $bcdp, $(bcdp.interp.S), $C0, $(ws.X), $(ws.fec)
+        $colloc_cdp, $(colloc_cdp.interp.S), $C0, $(ws.X), $(ws.fec)
     ) evals = 1
 
     # Policy evaluation: matrix assembly + LU solve (#75)
     grp["evaluate_policy"] = @benchmarkable evaluate_policy!(
-        $bcdp, $X0, C, $(ws.fec)
+        $colloc_cdp, $X0, C, $(ws.fec)
     ) setup = (C = Vector{Float64}(undef, $n)) evals = 1
 
     # Evaluation on a non-interpolation grid (#74)
@@ -185,11 +185,11 @@ let
     grp["solve_VFI_50iter"] =
         @benchmarkable solve($cdp, $solver_vfi; verbose=0)
     res = solve(cdp, solver_pfi; verbose=0)
-    bcdp = _with_interp(cdp, Interp(basis))
+    colloc_cdp = _with_interp(cdp, Interp(basis))
     C0 = copy(res.C)
-    ws = CDPWorkspace(bcdp)
+    ws = CDPWorkspace(colloc_cdp)
     grp["bellman_operator"] = @benchmarkable bellman_operator!(
-        $bcdp, C, $ws
+        $colloc_cdp, C, $ws
     ) setup = (C = copy($C0)) evals = 1
 end
 
@@ -227,11 +227,11 @@ let
     grp["solve_VFI_50iter"] =
         @benchmarkable solve($cdp, $solver_vfi; verbose=0)
     res = solve(cdp, solver_pfi; verbose=0)
-    bcdp = _with_interp(cdp, Interp(basis))
+    colloc_cdp = _with_interp(cdp, Interp(basis))
     C0 = copy(res.C)
-    ws = CDPWorkspace(bcdp)
+    ws = CDPWorkspace(colloc_cdp)
     grp["bellman_operator"] = @benchmarkable bellman_operator!(
-        $bcdp, C, $ws
+        $colloc_cdp, C, $ws
     ) setup = (C = copy($C0)) evals = 1
 end
 

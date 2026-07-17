@@ -148,6 +148,19 @@ reach through `res.cdp.interp` — consume only the public surface of `CDPSolveR
   noise (`CollocationSolver{Algo,TI<:Interp{...}}` leaks matrix/factorization
   types), serialization weight, and aliasing of one Interp across all results.
   If a future profile ever disagrees, eager (never lazy) is the mechanism.
+- **Docs "Example usage" two-step form kept deliberately** (revisited
+  2026-07-17 against a single-step naked-parameters form): the layers are
+  `OptimalGrowthModel` = the economic model (true continuous shock
+  distribution; `v_star`/`c_star` are exact for THIS layer, hence take `p`) →
+  `ContinuousDP` = the model with the expectation discretized by quadrature
+  (`shocks`/`weights` join unchanged `f`/`g`; the layer PR B's `as_mdp` wraps)
+  → `CollocationSolver(basis)` = the value-function approximation. One
+  approximation decision per step. The function/closure boundary is also
+  load-bearing for performance: primitives referencing non-`const` globals
+  (scalars or a NamedTuple alike) are inferred as `Any` inside `f`/`g` —
+  measured 3.4x slower, 5.7 vs 0.13 MiB per solve — and make an existing
+  `cdp` alias ambient session state; closures over function-locals bake
+  values in (value semantics, full speed).
 - **`CDPMDP` typing for discrete actions** (Float64-only vs parametric action
   type): postponed to PR B.
 - **`POMDPs.initialstate`**: leave undefined when not supplied (simulators take

@@ -59,10 +59,10 @@ end
     res = solve(cdp, CollocationSolver(basis), verbose=0)
     # Internal operators work on a problem with a bound interpolation
     # scheme; the result stores one
-    bcdp = res.cdp
+    colloc_cdp = res.cdp
     C0 = copy(res.C)
-    n = bcdp.interp.length
-    ws = CDPWorkspace(bcdp, inner_solver=:brent)
+    n = colloc_cdp.interp.length
+    ws = CDPWorkspace(colloc_cdp, inner_solver=:brent)
 
     @test length(ws.Tv) == n
     @test length(ws.X) == n
@@ -70,11 +70,11 @@ end
     # Workspace-based operators (with the Brent inner solver) agree with the
     # buffer-based ones
     Tv = Vector{Float64}(undef, n)
-    @test bellman_operator!(bcdp, copy(C0), ws) ==
-          bellman_operator!(bcdp, copy(C0), Tv)
+    @test bellman_operator!(colloc_cdp, copy(C0), ws) ==
+          bellman_operator!(colloc_cdp, copy(C0), Tv)
 
     X = Vector{Float64}(undef, n)
-    @test policy_iteration_operator!(bcdp, copy(C0), ws) ==
-          policy_iteration_operator!(bcdp, copy(C0), X)
+    @test policy_iteration_operator!(colloc_cdp, copy(C0), ws) ==
+          policy_iteration_operator!(colloc_cdp, copy(C0), X)
     @test ws.X == X
 end

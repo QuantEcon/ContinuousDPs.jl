@@ -46,14 +46,14 @@ using QuantEcon: qnwlogn
         # Brent
         res = solve(cdp, CollocationSolver(basis; inner_solver=:foc),
                     verbose=0)
-        bcdp = res.cdp
-        ws = CDPWorkspace(bcdp)
+        colloc_cdp = res.cdp
+        ws = CDPWorkspace(colloc_cdp)
         foreach(dfec -> set_coefs!(dfec, res.C), ws.dfecs)
-        for i in 1:bcdp.interp.length
-            s = bcdp.interp.S[i]
-            v_foc, x_foc = _s_wise_max_foc!(bcdp, s, res.C, ws.fec, ws.dfecs,
+        for i in 1:colloc_cdp.interp.length
+            s = colloc_cdp.interp.S[i]
+            v_foc, x_foc = _s_wise_max_foc!(colloc_cdp, s, res.C, ws.fec, ws.dfecs,
                                             NaN)
-            v_brent, x_brent = _s_wise_max!(bcdp, s, res.C, ws.fec)
+            v_brent, x_brent = _s_wise_max!(colloc_cdp, s, res.C, ws.fec)
             @test v_foc ≈ v_brent rtol=1e-8
             @test x_foc ≈ x_brent atol=1e-6
         end
@@ -88,10 +88,10 @@ using QuantEcon: qnwlogn
         res = solve(cdp_c, CollocationSolver(Basis(ChebParams(10, 0.1, 2.0));
                                              inner_solver=:foc), verbose=0)
         @test res.converged
-        bcdp = res.cdp
-        ws = CDPWorkspace(bcdp)
+        colloc_cdp = res.cdp
+        ws = CDPWorkspace(colloc_cdp)
         foreach(dfec -> set_coefs!(dfec, res.C), ws.dfecs)
-        v, x = _s_wise_max_foc!(bcdp, bcdp.interp.S[1], res.C, ws.fec,
+        v, x = _s_wise_max_foc!(colloc_cdp, colloc_cdp.interp.S[1], res.C, ws.fec,
                                 ws.dfecs, NaN)
         @test x ≈ 1.0 atol=1e-6
     end
@@ -108,7 +108,7 @@ using QuantEcon: qnwlogn
         basis = Basis(ChebParams(10, s_min, s_max))
         @test_throws ArgumentError CollocationSolver(basis;
                                                      inner_solver=:newton)
-        bcdp = ContinuousDPs._with_interp(cdp, ContinuousDPs.Interp(basis))
-        @test_throws ArgumentError CDPWorkspace(bcdp, inner_solver=:bogus)
+        colloc_cdp = ContinuousDPs._with_interp(cdp, ContinuousDPs.Interp(basis))
+        @test_throws ArgumentError CDPWorkspace(colloc_cdp, inner_solver=:bogus)
     end
 end
