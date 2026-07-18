@@ -1,5 +1,5 @@
 using BasisMatrices: ckron, evalbase
-using ContinuousDPs: evaluate_policy!, FunEvalCache
+using ContinuousDPs: evaluate_policy!, FunEvalCache, Interp, _with_interp
 using QuantEcon: qnwnorm
 
 @testset "evaluate_policy!" begin
@@ -36,8 +36,11 @@ using QuantEcon: qnwnorm
     ]
         f(s, x) = log(1 + s + x)
         g(s, x, e) = clamp(0.5 * s + 0.2 * x + 0.1 * e, 0., 1.)
-        cdp = ContinuousDP(f, g, 0.9, shocks, weights, s -> 0., s -> 1.,
-                           basis)
+        # evaluate_policy! is internal and operates on a problem with a
+        # bound interpolation scheme
+        cdp = _with_interp(
+            ContinuousDP(f, g, 0.9, shocks, weights, s -> 0., s -> 1.),
+            Interp(basis))
         X = [0.25 + 0.5 * s for s in cdp.interp.S]
         C = Vector{Float64}(undef, cdp.interp.length)
         evaluate_policy!(cdp, X, C)
@@ -61,8 +64,9 @@ using QuantEcon: qnwnorm
         f(s, x) = log(1 + s[1] + s[2] + x)
         g(s, x, e) = (clamp(0.5 * s[1] + 0.2 * x + 0.1 * e, 0., 1.),
                       clamp(0.8 * s[2] + 0.1, 0., 1.))
-        cdp = ContinuousDP(f, g, 0.9, shocks, weights, s -> 0., s -> 1.,
-                           basis)
+        cdp = _with_interp(
+            ContinuousDP(f, g, 0.9, shocks, weights, s -> 0., s -> 1.),
+            Interp(basis))
         n = cdp.interp.length
         X = [0.25 + 0.25 * (cdp.interp.S[i, 1] + cdp.interp.S[i, 2])
              for i in 1:n]

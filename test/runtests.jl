@@ -6,6 +6,7 @@ using Test
 using Random
 
 include("test_point_eval.jl")
+include("test_solver_types.jl")
 include("test_workspace.jl")
 include("test_foc.jl")
 include("test_evaluate_policy.jl")

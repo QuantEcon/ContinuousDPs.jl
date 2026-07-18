@@ -47,24 +47,23 @@ nodes.
 The package builds on [`BasisMatrices.jl`](https://github.com/QuantEcon/BasisMatrices.jl)
 for basis construction and interpolation.
 
-To solve the problem, construct a `ContinuousDP` instance by passing the
-primitives of the model:
+To solve the problem, first construct a `ContinuousDP` instance by passing
+the primitives of the model:
 
 ```Julia
-cdp = ContinuousDP(f, g, discount, shocks, weights, x_lb, x_ub, basis)
+cdp = ContinuousDP(f=f, g=g, discount=discount, shocks=shocks,
+                   weights=weights, x_lb=x_lb, x_ub=x_ub)
 ```
 where
 - `f`, `g`, `x_lb`, and `x_ub` are callable objects that represent the reward
   function, the state transition function, and the lower and upper action
   bounds functions, respectively,
-- `discount` is the discount factor,
+- `discount` is the discount factor, and
 - `shocks` and `weights` specify a discretization of the distribution of
-  $\varepsilon$ (a vector of nodes and their probability weights), and
-- `basis` is a `Basis` object from
-  [`BasisMatrices.jl`](https://github.com/QuantEcon/BasisMatrices.jl) that
-  contains the interpolation basis information.
+  $\varepsilon$ (a vector of nodes and their probability weights).
 
-Instead of `x_lb` and `x_ub`, an action space object can be passed:
+Instead of `x_lb` and `x_ub`, an action space object can be passed as
+`actions`:
 `ContinuousActions{M}(x_lb, x_ub)` for an `M`-dimensional box of continuous
 actions (with the bound functions returning length-`M` tuples or
 vectors; policy
@@ -73,10 +72,23 @@ for a finite set of actions of arbitrary type (solved by exact enumeration,
 with `res.X_ind` holding the indices of the optimal actions into `vals`). `DiscreteActions(vals)` represents a fixed finite action set; for
 state-dependent infeasibility, return `-Inf` from `f(s, x)`.
 
-Then call `solve(cdp)` to obtain the value function, policy function, and
-residuals. The inner maximization over continuous actions is solved via the
-first-order condition by default; pass `inner_solver=:brent` to `solve` for
-a derivative-free method.
+The solution methodology --- the interpolation basis and the algorithm
+parameters --- is specified separately by a solver object:
+
+```Julia
+solver = CollocationSolver(basis; algorithm=PFI)  # or algorithm=VFI
+res = solve(cdp, solver)
+```
+where `basis` is a `Basis` object from
+[`BasisMatrices.jl`](https://github.com/QuantEcon/BasisMatrices.jl) that
+contains the interpolation basis information; its domain is the
+approximation domain of the value function. `solve` returns the value
+function, policy function, and residuals. The inner maximization over
+continuous actions is solved via the first-order condition by default; pass
+`inner_solver=:brent` to `CollocationSolver` for a derivative-free method,
+and `tol` and `max_iter` to control the iteration. For linear-quadratic
+approximation around a reference point, pass `LQASolver(basis; point=(s, x, e))`
+to `solve` instead.
 
 ## Example usage
 
@@ -103,12 +115,13 @@ p = OptimalGrowthModel()
 # Lognormal quadrature nodes and weights from QuantEcon.jl
 shocks, weights = qnwlogn(7, p.mu, p.sigma^2)
 
-# Chebyshev basis from BasisMatrices.jl
-basis = Basis(ChebParams(30, p.s_min, p.s_max))
+# Construct the DP with the model primitives
+cdp = ContinuousDP(f=p.f, g=p.g, discount=p.beta, shocks=shocks,
+                   weights=weights, x_lb=p.x_lb, x_ub=p.x_ub);
 
-# Construct and solve the DP
-cdp = ContinuousDP(p.f, p.g, p.beta, shocks, weights, p.x_lb, p.x_ub, basis);
-res = solve(cdp);
+# Solve by collocation with a Chebyshev basis from BasisMatrices.jl
+basis = Basis(ChebParams(30, p.s_min, p.s_max))
+res = solve(cdp, CollocationSolver(basis));
 
 # Set evaluation nodes to finer grid
 grid_y = collect(range(p.s_min, stop=p.s_max, length=200))

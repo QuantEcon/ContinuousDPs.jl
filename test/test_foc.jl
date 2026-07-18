@@ -4,7 +4,7 @@ using QuantEcon: qnwlogn
 @testset "FOC inner solver" begin
     # 1-D stochastic optimal growth with action bounds keeping the next
     # state within the interpolation domain (as in benchmark/benchmarks.jl)
-    function growth_model(basis, s_min, s_max)
+    function growth_model(s_min, s_max)
         alpha = 0.65
         f(s, x) = log(x)
         g(s, x, e) = e * s^alpha - x
@@ -12,10 +12,11 @@ using QuantEcon: qnwlogn
         e_min, e_max = extrema(shocks)
         x_lb(s) = max(1e-8, e_max * s^alpha - s_max)
         x_ub(s) = min(s, e_min * s^alpha - s_min)
-        return ContinuousDP(f, g, 0.95, shocks, weights, x_lb, x_ub, basis)
+        return ContinuousDP(f, g, 0.95, shocks, weights, x_lb, x_ub)
     end
 
     s_min, s_max = 0.1, 2.0
+    cdp = growth_model(s_min, s_max)
 
     @testset "agreement with Brent: $label, $method" for
         (label, basis) in [
@@ -24,9 +25,11 @@ using QuantEcon: qnwlogn
         ],
         method in (PFI, VFI)
 
-        cdp = growth_model(basis, s_min, s_max)
-        res_foc = solve(cdp, method, verbose=0, inner_solver=:foc)
-        res_brent = solve(cdp, method, verbose=0, inner_solver=:brent)
+        res_foc = solve(cdp, CollocationSolver(basis; algorithm=method,
+                                               inner_solver=:foc), verbose=0)
+        res_brent = solve(cdp, CollocationSolver(basis; algorithm=method,
+                                                 inner_solver=:brent),
+                          verbose=0)
         @test res_foc.converged
         @test res_brent.converged
         @test res_foc.V ≈ res_brent.V rtol=1e-8
@@ -41,15 +44,16 @@ using QuantEcon: qnwlogn
         # coefficients: the solve-level comparison cannot see the FOC
         # maximizers directly, since `evaluate!` recomputes `res.X` with
         # Brent
-        cdp = growth_model(basis, s_min, s_max)
-        res = solve(cdp, PFI, verbose=0, inner_solver=:foc)
-        ws = CDPWorkspace(cdp)
+        res = solve(cdp, CollocationSolver(basis; inner_solver=:foc),
+                    verbose=0)
+        colloc_cdp = res.cdp
+        ws = CDPWorkspace(colloc_cdp)
         foreach(dfec -> set_coefs!(dfec, res.C), ws.dfecs)
-        for i in 1:cdp.interp.length
-            s = cdp.interp.S[i]
-            v_foc, x_foc = _s_wise_max_foc!(cdp, s, res.C, ws.fec, ws.dfecs,
+        for i in 1:colloc_cdp.interp.length
+            s = colloc_cdp.interp.S[i]
+            v_foc, x_foc = _s_wise_max_foc!(colloc_cdp, s, res.C, ws.fec, ws.dfecs,
                                             NaN)
-            v_brent, x_brent = _s_wise_max!(cdp, s, res.C, ws.fec)
+            v_brent, x_brent = _s_wise_max!(colloc_cdp, s, res.C, ws.fec)
             @test v_foc ≈ v_brent rtol=1e-8
             @test x_foc ≈ x_brent atol=1e-6
         end
@@ -61,9 +65,9 @@ using QuantEcon: qnwlogn
         beta = 0.95
         f(s, x) = -(x - 2.0)^2
         g(s, x, e) = 0.5 * s + 0.25  # stays within [0.1, 2.0]
-        cdp = ContinuousDP(f, g, beta, [1.0], [1.0], s -> 0.0, s -> 1.0,
-                           Basis(ChebParams(10, 0.1, 2.0)))
-        res = solve(cdp, PFI, verbose=0, inner_solver=:foc)
+        cdp_c = ContinuousDP(f, g, beta, [1.0], [1.0], s -> 0.0, s -> 1.0)
+        res = solve(cdp_c, CollocationSolver(Basis(ChebParams(10, 0.1, 2.0));
+                                             inner_solver=:foc), verbose=0)
         @test res.converged
         @test all(isapprox.(res.X, 1.0; atol=1e-6))
         # At a corner, H' != 0, so the inward evaluation offset (~sqrt(eps))
@@ -80,29 +84,31 @@ using QuantEcon: qnwlogn
         beta = 0.95
         f(s, x) = 0.0 <= x <= 1.0 ? -(x - 2.0)^2 : -100.0
         g(s, x, e) = 0.5 * s + 0.25
-        cdp = ContinuousDP(f, g, beta, [1.0], [1.0], s -> 0.0, s -> 1.0,
-                           Basis(ChebParams(10, 0.1, 2.0)))
-        res = solve(cdp, PFI, verbose=0, inner_solver=:foc)
+        cdp_c = ContinuousDP(f, g, beta, [1.0], [1.0], s -> 0.0, s -> 1.0)
+        res = solve(cdp_c, CollocationSolver(Basis(ChebParams(10, 0.1, 2.0));
+                                             inner_solver=:foc), verbose=0)
         @test res.converged
-        ws = CDPWorkspace(cdp)
+        colloc_cdp = res.cdp
+        ws = CDPWorkspace(colloc_cdp)
         foreach(dfec -> set_coefs!(dfec, res.C), ws.dfecs)
-        v, x = _s_wise_max_foc!(cdp, cdp.interp.S[1], res.C, ws.fec,
+        v, x = _s_wise_max_foc!(colloc_cdp, colloc_cdp.interp.S[1], res.C, ws.fec,
                                 ws.dfecs, NaN)
         @test x ≈ 1.0 atol=1e-6
     end
 
     @testset "automatic Brent for non-differentiable bases" begin
-        cdp = growth_model(Basis(LinParams(50, s_min, s_max)), s_min, s_max)
-        ws = CDPWorkspace(cdp)  # inner_solver defaults to :foc
-        @test ws.dfecs === nothing  # Lin basis: FOC unavailable
-        res = solve(cdp, PFI, verbose=0)  # solves fine via Brent
+        basis = Basis(LinParams(50, s_min, s_max))
+        res = solve(cdp, CollocationSolver(basis), verbose=0)  # solves fine via Brent
         @test res.converged
+        ws = CDPWorkspace(res.cdp)  # inner_solver defaults to :foc
+        @test ws.dfecs === nothing  # Lin basis: FOC unavailable
     end
 
     @testset "argument errors" begin
-        cdp = growth_model(Basis(ChebParams(10, s_min, s_max)), s_min, s_max)
-        @test_throws ArgumentError solve(cdp, PFI, verbose=0,
-                                         inner_solver=:newton)
-        @test_throws ArgumentError CDPWorkspace(cdp, inner_solver=:bogus)
+        basis = Basis(ChebParams(10, s_min, s_max))
+        @test_throws ArgumentError CollocationSolver(basis;
+                                                     inner_solver=:newton)
+        colloc_cdp = ContinuousDPs._with_interp(cdp, ContinuousDPs.Interp(basis))
+        @test_throws ArgumentError CDPWorkspace(colloc_cdp, inner_solver=:bogus)
     end
 end
