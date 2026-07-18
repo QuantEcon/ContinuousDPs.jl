@@ -15,7 +15,8 @@ using QuantEcon: qnwlogn
         # Keyword form (canonical)
         cdp = ContinuousDP(f=f, g=g, discount=beta, shocks=shocks,
                            weights=weights, x_lb=x_lb, x_ub=x_ub)
-        @test cdp.interp === nothing
+        # A ContinuousDP holds primitives only
+        @test !(:interp in fieldnames(ContinuousDP))
         @test cdp.discount == beta
         @test cdp.actions isa ContinuousActions{1}
 
@@ -28,10 +29,10 @@ using QuantEcon: qnwlogn
         # Positional forms
         cdp_p = @inferred ContinuousDP(f, g, beta, shocks, weights, x_lb,
                                        x_ub)
-        @test cdp_p.interp === nothing
+        @test cdp_p isa ContinuousDP
         cdp_p2 = @inferred ContinuousDP(f, g, beta, shocks, weights,
                                         ContinuousActions(x_lb, x_ub))
-        @test cdp_p2.interp === nothing
+        @test cdp_p2 isa ContinuousDP
 
         # Exclusivity of `actions` and `x_lb`/`x_ub`
         @test_throws ArgumentError ContinuousDP(
@@ -53,10 +54,9 @@ using QuantEcon: qnwlogn
                                 actions=DiscreteActions(x_grid))
         @test cdp_disc.actions isa DiscreteActions
         @test cdp_disc.actions.vals == x_grid
-        @test cdp_disc.interp === nothing
 
-        # The state dimension is not known without a solver
-        @test_throws ArgumentError ndims(cdp)
+        # The state dimension is not defined without a solver
+        @test_throws MethodError ndims(cdp)
     end
 
     @testset "CollocationSolver construction" begin
@@ -107,9 +107,9 @@ using QuantEcon: qnwlogn
     @testset "solve with a solver object" begin
         res = @inferred solve(cdp, CollocationSolver(basis); verbose=0)
         @test res.converged
-        # The bound problem is stored in the result
-        @test res.cdp.interp !== nothing
-        @test ndims(res.cdp) == 1
+        # The problem and the interpolation scheme are stored in the result
+        @test res.cdp isa ContinuousDP
+        @test res.interp isa ContinuousDPs.Interp
         @test ndims(res) == 1
 
         # v_init length validation
@@ -149,29 +149,27 @@ using QuantEcon: qnwlogn
         # The solver's basis determines the approximation
         basis_b = Basis(ChebParams(12, s_min, s_max))
         res_b = solve(cdp, CollocationSolver(basis_b); verbose=0)
-        @test res_b.cdp.interp.basis === basis_b
+        @test res_b.interp.basis === basis_b
         @test length(res_b.C) == 12
     end
 
     @testset "copy constructor" begin
         # Primitives copy stays primitives
         cdp2 = @inferred ContinuousDP(cdp)
-        @test cdp2.interp === nothing
         @test cdp2.discount == cdp.discount
         @test cdp2.shocks == cdp.shocks
         @test cdp2.weights == cdp.weights
 
         cdp3 = ContinuousDP(cdp; discount=0.9)
         @test cdp3.discount == 0.9
-        @test cdp3.interp === nothing
 
         # The removed basis keyword is rejected
         @test_throws MethodError ContinuousDP(cdp; basis=basis)
 
-        # A copy of a solver-bound problem is primitives-only
+        # The problem stored in a result copies like any other
         res = solve(cdp, CollocationSolver(basis); verbose=0)
         cdp4 = ContinuousDP(res.cdp; discount=0.9)
-        @test cdp4.interp === nothing
+        @test cdp4 isa ContinuousDP
         @test cdp4.discount == 0.9
     end
 end

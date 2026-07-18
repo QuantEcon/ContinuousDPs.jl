@@ -58,8 +58,8 @@ end
 
     res = solve(cdp, CollocationSolver(basis), verbose=0)
     # Internal operators work on a problem with a bound interpolation
-    # scheme; the result stores one
-    colloc_cdp = res.cdp
+    # scheme; rebuild it from the result
+    colloc_cdp = ContinuousDPs._colloc(res)
     C0 = copy(res.C)
     n = colloc_cdp.interp.length
     ws = CDPWorkspace(colloc_cdp, inner_solver=:brent)

@@ -172,7 +172,7 @@ _action_dim(::ContinuousActions{M}) where M = M
 
 
 """
-    ContinuousDP{N,Tf,Tg,TR,TA,TI}
+    ContinuousDP{Tf,Tg,TR,TA}
 
 Type representing a continuous-state dynamic program. A `ContinuousDP` holds
 the primitives of the problem; the interpolation scheme used to solve it is
@@ -188,20 +188,14 @@ and [`LQASolver`](@ref)).
 - `weights::Vector{Float64}`: Probability weights for the shock nodes.
 - `actions::TA<:ActionSpace`: Action space (see [`ContinuousActions`](@ref)
   and [`DiscreteActions`](@ref)).
-- `interp::TI<:Union{Interp{N},Nothing}`: Internal. `nothing` for a
-  primitives-only problem (the normal case; `N == 0` then serves as a
-  placeholder); an `Interp{N}` bound to the problem by `solve` (or by the
-  deprecated basis-endowed constructor).
 """
-struct ContinuousDP{N,Tf,Tg,TR<:AbstractVecOrMat,TA<:ActionSpace,
-                    TI<:Union{Interp{N},Nothing}}
+struct ContinuousDP{Tf,Tg,TR<:AbstractVecOrMat,TA<:ActionSpace}
     f::Tf
     g::Tg
     discount::Float64
     shocks::TR
     weights::Vector{Float64}
     actions::TA
-    interp::TI
 end
 
 """
@@ -230,9 +224,8 @@ Give either `actions`, or both `x_lb` and `x_ub` (equivalent to
 function ContinuousDP(f, g, discount::Real,
                       shocks::AbstractVecOrMat, weights::Vector{Float64},
                       actions::ActionSpace)
-    return ContinuousDP{0,typeof(f),typeof(g),typeof(shocks),
-                        typeof(actions),Nothing}(
-        f, g, Float64(discount), shocks, weights, actions, nothing)
+    return ContinuousDP{typeof(f),typeof(g),typeof(shocks),typeof(actions)}(
+        f, g, Float64(discount), shocks, weights, actions)
 end
 
 ContinuousDP(f, g, discount::Real,
@@ -309,15 +302,28 @@ function ContinuousDP(cdp::ContinuousDP;
 end
 
 
+# Internal: a ContinuousDP bound to an interpolation scheme. All solver
+# internals from the node-sweep level up consume this pair; ContinuousDP
+# itself stays primitives-only. The state-local point kernels
+# (_s_wise_max! and friends) take the plain ContinuousDP: they are
+# interpolation-free by design (they only need a FunEvalCache).
+struct _CollocationProblem{N,TCDP<:ContinuousDP,TI<:Interp{N}}
+    cdp::TCDP
+    interp::TI
+end
+
+Base.ndims(::_CollocationProblem{N}) where {N} = N
+
 """
-    CDPSolveResult{Algo,N,TCDP,TE}
+    CDPSolveResult{Algo,N,TCDP,TI,TE,TX}
 
 Type storing the solution of a continuous-state dynamic program obtained by
 algorithm `Algo`.
 
 # Fields
 
-- `cdp::TCDP<:ContinuousDP{N}`: The dynamic program that was solved.
+- `cdp::TCDP<:ContinuousDP`: The dynamic program that was solved.
+- `interp::TI<:Interp{N}`: The interpolation scheme used by the solver.
 - `tol::Float64`: Convergence tolerance used by the solver.
 - `max_iter::Int`: Maximum number of iterations allowed.
 - `C::Vector{Float64}`: Basis coefficient vector for the fitted value function.
@@ -327,9 +333,9 @@ algorithm `Algo`.
   `:brent`); also used when re-evaluating the policy (e.g. by
   `set_eval_nodes!`) for multi-dimensional continuous actions.
 - `eval_nodes::TE<:VecOrMat`: Nodes at which the solution is evaluated.
-  Defaults to `cdp.interp.S`.
+  Defaults to `interp.S`.
 - `eval_nodes_coord::NTuple{N,Vector{Float64}}`: Coordinate vectors of the
-  evaluation nodes along each dimension. Defaults to `cdp.interp.Scoord`.
+  evaluation nodes along each dimension. Defaults to `interp.Scoord`.
 - `V::Vector{Float64}`: Value function evaluated at `eval_nodes`.
 - `X::TX<:AbstractVecOrMat`: Policy function (action values) evaluated at
   `eval_nodes` (an `n x M` matrix for `M`-dimensional continuous actions).
@@ -337,9 +343,11 @@ algorithm `Algo`.
   `cdp.actions.vals` corresponding to `X`; empty otherwise.
 - `resid::Vector{Float64}`: Approximation residuals at `eval_nodes`.
 """
-mutable struct CDPSolveResult{Algo<:DPAlgorithm,N,TCDP<:ContinuousDP{N},
-                              TE<:VecOrMat,TX<:AbstractVecOrMat}
+mutable struct CDPSolveResult{Algo<:DPAlgorithm,N,TCDP<:ContinuousDP,
+                              TI<:Interp{N},TE<:VecOrMat,
+                              TX<:AbstractVecOrMat}
     cdp::TCDP
+    interp::TI
     tol::Float64
     max_iter::Int
     C::Vector{Float64}
@@ -353,45 +361,34 @@ mutable struct CDPSolveResult{Algo<:DPAlgorithm,N,TCDP<:ContinuousDP{N},
     X_ind::Vector{Int}
     resid::Vector{Float64}
 
-    function CDPSolveResult{Algo,N}(
-            cdp::TCDP, tol::Float64, max_iter::Integer,
+    function CDPSolveResult{Algo}(
+            cdp::TCDP, interp::Interp{N}, tol::Float64, max_iter::Integer,
             inner_solver::Symbol=:foc
-        ) where {Algo,N,TCDP<:ContinuousDP{N}}
-        C = zeros(cdp.interp.length)
+        ) where {Algo,N,TCDP<:ContinuousDP}
+        C = zeros(interp.length)
         converged = false
         num_iter = 0
-        eval_nodes = cdp.interp.S
-        eval_nodes_coord = cdp.interp.Scoord
+        eval_nodes = interp.S
+        eval_nodes_coord = interp.Scoord
         V = Float64[]
         X = _empty_policy(cdp.actions)
         X_ind = Int[]
         resid = Float64[]
-        res = new{Algo,N,TCDP,typeof(eval_nodes),typeof(X)}(
-            cdp, tol, max_iter, C, converged, num_iter, inner_solver,
+        res = new{Algo,N,TCDP,typeof(interp),typeof(eval_nodes),typeof(X)}(
+            cdp, interp, tol, max_iter, C, converged, num_iter, inner_solver,
             eval_nodes, eval_nodes_coord, V, X, X_ind, resid
         )
         return res
     end
 end
 
-Base.ndims(::ContinuousDP{N}) where {N} = N
-Base.ndims(::ContinuousDP{0}) = throw(ArgumentError(
-    "the state dimension of a primitives-only ContinuousDP is determined " *
-    "by the basis of the solver passed to `solve`"))
-
-# Bind an interpolation scheme to (a copy of) the problem's primitives.
-# Fully explicit type parameters: the implicit constructor cannot infer `N`
-# when `TI` is `Nothing`, so it is never relied upon here.
-_with_interp(cdp::ContinuousDP, interp::Interp{N}) where {N} =
-    ContinuousDP{N,typeof(cdp.f),typeof(cdp.g),typeof(cdp.shocks),
-                 typeof(cdp.actions),typeof(interp)}(
-        cdp.f, cdp.g, cdp.discount, cdp.shocks, cdp.weights, cdp.actions,
-        interp)
+# Rebuild the internal bound problem from a result
+_colloc(res::CDPSolveResult) = _CollocationProblem(res.cdp, res.interp)
 
 # Derivative caches for gradient-based evaluation sweeps, or nothing when
 # the basis does not support them (then the derivative-free path is used)
-function _eval_dfecs(cdp::ContinuousDP{N}) where N
-    basis = cdp.interp.basis
+function _eval_dfecs(interp::Interp{N}) where N
+    basis = interp.basis
     all(d -> _foc_suitable(basis.params[d]), 1:N) || return nothing
     return ntuple(d -> DerivFunEvalCache(
                basis, ntuple(i -> Int(i == d), Val(N))), Val(N))
@@ -431,7 +428,7 @@ function evaluate!(res::CDPSolveResult, fec::FunEvalCache)
     elseif a isa ContinuousActions && _action_dim(a) > 1
         # Respect the inner solver used by `solve`: a :brent solve must not
         # have its policy re-evaluated through the derivative-based path
-        dfecs = res.inner_solver == :foc ? _eval_dfecs(cdp) : nothing
+        dfecs = res.inner_solver == :foc ? _eval_dfecs(res.interp) : nothing
         dfecs === nothing || foreach(dfec -> set_coefs!(dfec, C), dfecs)
         for i in 1:n
             res.V[i] = _s_wise_max_multi!(cdp, _row(s_nodes, i), C, fec,
@@ -439,7 +436,7 @@ function evaluate!(res::CDPSolveResult, fec::FunEvalCache)
                                           dfecs !== nothing)
         end
     else
-        s_wise_max!(cdp, s_nodes, C, res.V, res.X, fec)
+        s_wise_max!(_colloc(res), s_nodes, C, res.V, res.X, fec)
     end
     for i in 1:n
         res.resid[i] = res.V[i] - funeval_point!(fec, C, _row(s_nodes, i))
@@ -448,7 +445,7 @@ function evaluate!(res::CDPSolveResult, fec::FunEvalCache)
 end
 
 evaluate!(res::CDPSolveResult) =
-    evaluate!(res, FunEvalCache(res.cdp.interp.basis))
+    evaluate!(res, FunEvalCache(res.interp.basis))
 
 function set_eval_nodes!(
         res::CDPSolveResult{Algo,1}, s_nodes_coord::NTuple{1,Vector{Float64}}
@@ -506,7 +503,7 @@ policy, and `resid` is the Bellman residual at `s_nodes`.
 function (res::CDPSolveResult)(s_nodes::AbstractArray{Float64})
     cdp, C = res.cdp, res.C
     a = cdp.actions
-    fec = FunEvalCache(cdp.interp.basis)
+    fec = FunEvalCache(res.interp.basis)
     n = size(s_nodes, 1)
     if a isa DiscreteActions
         V = Vector{Float64}(undef, n)
@@ -518,7 +515,7 @@ function (res::CDPSolveResult)(s_nodes::AbstractArray{Float64})
     elseif a isa ContinuousActions && _action_dim(a) > 1
         V = Vector{Float64}(undef, n)
         X = _policy_buffer(a, n)
-        dfecs = res.inner_solver == :foc ? _eval_dfecs(cdp) : nothing
+        dfecs = res.inner_solver == :foc ? _eval_dfecs(res.interp) : nothing
         dfecs === nothing || foreach(dfec -> set_coefs!(dfec, C), dfecs)
         for i in 1:n
             V[i] = _s_wise_max_multi!(cdp, _row(s_nodes, i), C, fec,
@@ -526,7 +523,7 @@ function (res::CDPSolveResult)(s_nodes::AbstractArray{Float64})
                                       dfecs !== nothing)
         end
     else
-        V, X = s_wise_max(cdp, s_nodes, C, fec)
+        V, X = s_wise_max(_colloc(res), s_nodes, C, fec)
     end
     resid = Vector{Float64}(undef, n)
     for i in 1:n
@@ -582,16 +579,18 @@ _foc_suitable(p::SplineParams) = p.k >= 2
 _foc_suitable(p::BasisParams) = false
 
 """
-    CDPWorkspace(cdp::ContinuousDP; inner_solver=:foc)
+    CDPWorkspace(cp::_CollocationProblem; inner_solver=:foc)
 
-Construct a `CDPWorkspace` for `cdp`. See [`solve`](@ref) for the meaning of
-`inner_solver`.
+Construct a `CDPWorkspace` for the bound problem `cp`. See [`solve`](@ref)
+for the meaning of `inner_solver`.
 """
-function CDPWorkspace(cdp::ContinuousDP{N}; inner_solver::Symbol=:foc) where N
+function CDPWorkspace(cp::_CollocationProblem{N};
+                      inner_solver::Symbol=:foc) where N
     inner_solver in (:foc, :brent) ||
         throw(ArgumentError("inner_solver must be :foc or :brent"))
-    basis = cdp.interp.basis
-    n = cdp.interp.length
+    cdp, interp = cp.cdp, cp.interp
+    basis = interp.basis
+    n = interp.length
     discrete = cdp.actions isa DiscreteActions
     dfecs = if !discrete && inner_solver == :foc &&
                all(d -> _foc_suitable(basis.params[d]), 1:N)
@@ -698,10 +697,11 @@ end
 
 # Enumeration over all interpolation nodes, storing values in `Tv` and
 # action indices in `X_ind`
-function _s_wise_max_discrete_sweep!(cdp::ContinuousDP, C::Vector{Float64},
+function _s_wise_max_discrete_sweep!(cp::_CollocationProblem,
+                                     C::Vector{Float64},
                                      Tv::Vector{Float64}, X_ind::Vector{Int},
                                      fec::FunEvalCache)
-    ss = cdp.interp.S
+    cdp, ss = cp.cdp, cp.interp.S
     for i in 1:size(ss, 1)
         Tv[i], X_ind[i] = _s_wise_max_discrete!(cdp, _row(ss, i), C, fec)
     end
@@ -874,11 +874,11 @@ warm starts (`NaN` entries mean cold start). Sets the coefficients of
 `dfecs` from `C`. Falls back to Brent state-by-state on exceptions from the
 model functions (e.g. a `DomainError` at a finite-difference point).
 """
-function _s_wise_max_foc_sweep!(cdp::ContinuousDP, C::Vector{Float64},
+function _s_wise_max_foc_sweep!(cp::_CollocationProblem, C::Vector{Float64},
                                 Tv::Vector{Float64}, X::Vector{Float64},
                                 fec::FunEvalCache, dfecs)
     foreach(dfec -> set_coefs!(dfec, C), dfecs)
-    ss = cdp.interp.S
+    cdp, ss = cp.cdp, cp.interp.S
     for i in 1:size(ss, 1)
         s = _row(ss, i)
         Tv[i], X[i] =
@@ -1095,13 +1095,14 @@ end
 
 # Sweep over all interpolation nodes for M-dimensional continuous actions;
 # rows of `X` are warm starts on input and maximizers on output
-function _s_wise_max_multi_sweep!(cdp::ContinuousDP, C::Vector{Float64},
+function _s_wise_max_multi_sweep!(cp::_CollocationProblem,
+                                  C::Vector{Float64},
                                   Tv::Vector{Float64}, X::Matrix{Float64},
                                   fec::FunEvalCache, dfecs, use_foc::Bool)
     if use_foc && dfecs !== nothing
         foreach(dfec -> set_coefs!(dfec, C), dfecs)
     end
-    ss = cdp.interp.S
+    cdp, ss = cp.cdp, cp.interp.S
     for i in 1:size(ss, 1)
         Tv[i] = _s_wise_max_multi!(cdp, _row(ss, i), C, fec, dfecs,
                                    view(X, i, :), use_foc)
@@ -1129,9 +1130,10 @@ action spaces are handled internally by the operators.
 
 - `Tv::Vector{Float64}`: Updated value function vector.
 """
-function s_wise_max!(cdp::ContinuousDP, ss::AbstractArray{Float64},
+function s_wise_max!(cp::_CollocationProblem, ss::AbstractArray{Float64},
                      C::Vector{Float64}, Tv::Vector{Float64},
                      fec::FunEvalCache)
+    cdp = cp.cdp
     n = size(ss, 1)
     for i in 1:n
         Tv[i], _ = _s_wise_max!(cdp, _row(ss, i), C, fec)
@@ -1139,9 +1141,9 @@ function s_wise_max!(cdp::ContinuousDP, ss::AbstractArray{Float64},
     return Tv
 end
 
-s_wise_max!(cdp::ContinuousDP, ss::AbstractArray{Float64},
+s_wise_max!(cp::_CollocationProblem, ss::AbstractArray{Float64},
             C::Vector{Float64}, Tv::Vector{Float64}) =
-    s_wise_max!(cdp, ss, C, Tv, FunEvalCache(cdp.interp.basis))
+    s_wise_max!(cp, ss, C, Tv, FunEvalCache(cp.interp.basis))
 
 """
     s_wise_max!(cdp, ss, C, Tv, X[, fec])
@@ -1163,9 +1165,10 @@ Find optimal value and action for each grid point.
 - `Tv::Vector{Float64}`: Updated value function vector.
 - `X::Vector{Float64}`: Updated policy function vector.
 """
-function s_wise_max!(cdp::ContinuousDP, ss::AbstractArray{Float64},
+function s_wise_max!(cp::_CollocationProblem, ss::AbstractArray{Float64},
                      C::Vector{Float64}, Tv::Vector{Float64},
                      X::Vector{Float64}, fec::FunEvalCache)
+    cdp = cp.cdp
     n = size(ss, 1)
     for i in 1:n
         Tv[i], X[i] = _s_wise_max!(cdp, _row(ss, i), C, fec)
@@ -1173,9 +1176,9 @@ function s_wise_max!(cdp::ContinuousDP, ss::AbstractArray{Float64},
     return Tv, X
 end
 
-s_wise_max!(cdp::ContinuousDP, ss::AbstractArray{Float64},
+s_wise_max!(cp::_CollocationProblem, ss::AbstractArray{Float64},
             C::Vector{Float64}, Tv::Vector{Float64}, X::Vector{Float64}) =
-    s_wise_max!(cdp, ss, C, Tv, X, FunEvalCache(cdp.interp.basis))
+    s_wise_max!(cp, ss, C, Tv, X, FunEvalCache(cp.interp.basis))
 
 """
     s_wise_max(cdp, ss, C[, fec])
@@ -1195,16 +1198,16 @@ Find optimal value and action for each grid point.
 - `Tv::Vector{Float64}`: Value function vector.
 - `X::Vector{Float64}`: Policy function vector.
 """
-function s_wise_max(cdp::ContinuousDP, ss::AbstractArray{Float64},
+function s_wise_max(cp::_CollocationProblem, ss::AbstractArray{Float64},
                     C::Vector{Float64}, fec::FunEvalCache)
     n = size(ss, 1)
     Tv, X = Array{Float64}(undef, n), Array{Float64}(undef, n)
-    s_wise_max!(cdp, ss, C, Tv, X, fec)
+    s_wise_max!(cp, ss, C, Tv, X, fec)
 end
 
-s_wise_max(cdp::ContinuousDP, ss::AbstractArray{Float64},
+s_wise_max(cp::_CollocationProblem, ss::AbstractArray{Float64},
            C::Vector{Float64}) =
-    s_wise_max(cdp, ss, C, FunEvalCache(cdp.interp.basis))
+    s_wise_max(cp, ss, C, FunEvalCache(cp.interp.basis))
 
 
 """
@@ -1225,36 +1228,38 @@ stored in `Tv` (or `ws.Tv`).
 
 - `C::Vector{Float64}`: Updated basis coefficient vector.
 """
-function bellman_operator!(cdp::ContinuousDP, C::Vector{Float64},
+function bellman_operator!(cp::_CollocationProblem, C::Vector{Float64},
                            ws::CDPWorkspace)
+    cdp, interp = cp.cdp, cp.interp
     if cdp.actions isa DiscreteActions
-        _s_wise_max_discrete_sweep!(cdp, C, ws.Tv, ws.X_ind, ws.fec)
+        _s_wise_max_discrete_sweep!(cp, C, ws.Tv, ws.X_ind, ws.fec)
     elseif cdp.actions isa ContinuousActions && _action_dim(cdp.actions) > 1
-        _s_wise_max_multi_sweep!(cdp, C, ws.Tv, ws.X, ws.fec, ws.dfecs,
+        _s_wise_max_multi_sweep!(cp, C, ws.Tv, ws.X, ws.fec, ws.dfecs,
                                  ws.inner_solver == :foc)
     elseif _use_foc(ws)
-        _s_wise_max_foc_sweep!(cdp, C, ws.Tv, ws.X, ws.fec, ws.dfecs)
+        _s_wise_max_foc_sweep!(cp, C, ws.Tv, ws.X, ws.fec, ws.dfecs)
     else
-        s_wise_max!(cdp, cdp.interp.S, C, ws.Tv, ws.X, ws.fec)
+        s_wise_max!(cp, interp.S, C, ws.Tv, ws.X, ws.fec)
     end
-    ldiv!(C, cdp.interp.Phi_lu, ws.Tv)
+    ldiv!(C, interp.Phi_lu, ws.Tv)
     return C
 end
 
-function bellman_operator!(cdp::ContinuousDP, C::Vector{Float64},
+function bellman_operator!(cp::_CollocationProblem, C::Vector{Float64},
                            Tv::Vector{Float64})
+    cdp, interp = cp.cdp, cp.interp
     if cdp.actions isa DiscreteActions
         X_ind = Vector{Int}(undef, length(Tv))
-        _s_wise_max_discrete_sweep!(cdp, C, Tv, X_ind,
-                                    FunEvalCache(cdp.interp.basis))
+        _s_wise_max_discrete_sweep!(cp, C, Tv, X_ind,
+                                    FunEvalCache(interp.basis))
     elseif cdp.actions isa ContinuousActions && _action_dim(cdp.actions) > 1
-        ws = CDPWorkspace(cdp)
-        _s_wise_max_multi_sweep!(cdp, C, Tv, ws.X, ws.fec, ws.dfecs,
+        ws = CDPWorkspace(cp)
+        _s_wise_max_multi_sweep!(cp, C, Tv, ws.X, ws.fec, ws.dfecs,
                                  ws.inner_solver == :foc)
     else
-        s_wise_max!(cdp, cdp.interp.S, C, Tv)
+        s_wise_max!(cp, interp.S, C, Tv)
     end
-    ldiv!(C, cdp.interp.Phi_lu, Tv)
+    ldiv!(C, interp.Phi_lu, Tv)
     return C
 end
 
@@ -1278,9 +1283,10 @@ Compute the greedy policy for the given basis coefficients.
 
 - `X::Vector{Float64}`: Updated policy function vector.
 """
-function compute_greedy!(cdp::ContinuousDP, ss::AbstractArray{Float64},
+function compute_greedy!(cp::_CollocationProblem, ss::AbstractArray{Float64},
                          C::Vector{Float64}, X::Vector{Float64},
                          fec::FunEvalCache)
+    cdp = cp.cdp
     n = size(ss, 1)
     for i in 1:n
         _, X[i] = _s_wise_max!(cdp, _row(ss, i), C, fec)
@@ -1288,12 +1294,13 @@ function compute_greedy!(cdp::ContinuousDP, ss::AbstractArray{Float64},
     return X
 end
 
-compute_greedy!(cdp::ContinuousDP, ss::AbstractArray{Float64},
+compute_greedy!(cp::_CollocationProblem, ss::AbstractArray{Float64},
                 C::Vector{Float64}, X::Vector{Float64}) =
-    compute_greedy!(cdp, ss, C, X, FunEvalCache(cdp.interp.basis))
+    compute_greedy!(cp, ss, C, X, FunEvalCache(cp.interp.basis))
 
-compute_greedy!(cdp::ContinuousDP, C::Vector{Float64}, X::Vector{Float64}) =
-    compute_greedy!(cdp, cdp.interp.S, C, X)
+compute_greedy!(cp::_CollocationProblem, C::Vector{Float64},
+                X::Vector{Float64}) =
+    compute_greedy!(cp, cp.interp.S, C, X)
 
 """
     evaluate_policy!(cdp, X, C[, fec])
@@ -1318,10 +1325,11 @@ factorized in sparse form.
 
 - `C::Vector{Float64}`: Updated basis coefficient vector.
 """
-function evaluate_policy!(cdp::ContinuousDP, X::AbstractVecOrMat,
+function evaluate_policy!(cp::_CollocationProblem, X::AbstractVecOrMat,
                           C::Vector{Float64}, fec::FunEvalCache)
-    A_lu = _policy_system_lu(cdp.interp.Phi, cdp, X, fec)
-    ss = cdp.interp.S
+    cdp, interp = cp.cdp, cp.interp
+    A_lu = _policy_system_lu(interp.Phi, cp, X, fec)
+    ss = interp.S
     for i in 1:size(ss, 1)
         C[i] = cdp.f(_row(ss, i), _row(X, i))
     end
@@ -1329,9 +1337,9 @@ function evaluate_policy!(cdp::ContinuousDP, X::AbstractVecOrMat,
     return C
 end
 
-evaluate_policy!(cdp::ContinuousDP, X::AbstractVecOrMat,
+evaluate_policy!(cp::_CollocationProblem, X::AbstractVecOrMat,
                  C::Vector{Float64}) =
-    evaluate_policy!(cdp, X, C, FunEvalCache(cdp.interp.basis))
+    evaluate_policy!(cp, X, C, FunEvalCache(cp.interp.basis))
 
 # Evaluate the per-dimension basis functions at the point `x` (values are
 # left in `fec.caches[d].vals`) and return `(nvals, base)`: the number of
@@ -1353,10 +1361,11 @@ end
 
 # Dense path: A = Phi - beta * E[Phi(g(S, X, e))] assembled in place,
 # factorized with an in-place dense LU
-function _policy_system_lu(Phi::AbstractMatrix, cdp::ContinuousDP, X, fec)
-    n = size(cdp.interp.S, 1)
+function _policy_system_lu(Phi::AbstractMatrix, cp::_CollocationProblem,
+                           X, fec)
+    cdp, ss = cp.cdp, cp.interp.S
+    n = size(ss, 1)
     A = copyto!(Matrix{Float64}(undef, n, n), Phi)
-    ss = cdp.interp.S
     for i in 1:n
         s = _row(ss, i)
         for j in eachindex(cdp.weights)
@@ -1395,10 +1404,11 @@ end
 # Sparse path: assemble E = E[Phi(g(S, X, e))] in triplet form (exploiting
 # that only few basis functions are nonzero at each point), then factorize
 # A = Phi - beta * E with a sparse LU
-function _policy_system_lu(Phi::SparseMatrixCSC, cdp::ContinuousDP, X, fec)
-    n = size(cdp.interp.S, 1)
+function _policy_system_lu(Phi::SparseMatrixCSC, cp::_CollocationProblem,
+                           X, fec)
+    cdp, ss = cp.cdp, cp.interp.S
+    n = size(ss, 1)
     Is, Js, Vs = Int[], Int[], Float64[]
-    ss = cdp.interp.S
     for i in 1:n
         s = _row(ss, i)
         for j in eachindex(cdp.weights)
@@ -1454,29 +1464,30 @@ Perform one step of policy function iteration and update the basis coefficients.
 
 - `C::Vector{Float64}`: Updated basis coefficient vector.
 """
-function policy_iteration_operator!(cdp::ContinuousDP, C::Vector{Float64},
-                                    ws::CDPWorkspace)
+function policy_iteration_operator!(cp::_CollocationProblem,
+                                    C::Vector{Float64}, ws::CDPWorkspace)
+    cdp = cp.cdp
     if cdp.actions isa DiscreteActions
-        _s_wise_max_discrete_sweep!(cdp, C, ws.Tv, ws.X_ind, ws.fec)
-        evaluate_policy!(cdp, view(cdp.actions.vals, ws.X_ind), C, ws.fec)
+        _s_wise_max_discrete_sweep!(cp, C, ws.Tv, ws.X_ind, ws.fec)
+        evaluate_policy!(cp, view(cdp.actions.vals, ws.X_ind), C, ws.fec)
     elseif cdp.actions isa ContinuousActions && _action_dim(cdp.actions) > 1
-        _s_wise_max_multi_sweep!(cdp, C, ws.Tv, ws.X, ws.fec, ws.dfecs,
+        _s_wise_max_multi_sweep!(cp, C, ws.Tv, ws.X, ws.fec, ws.dfecs,
                                  ws.inner_solver == :foc)
-        evaluate_policy!(cdp, ws.X, C, ws.fec)
+        evaluate_policy!(cp, ws.X, C, ws.fec)
     elseif _use_foc(ws)
-        _s_wise_max_foc_sweep!(cdp, C, ws.Tv, ws.X, ws.fec, ws.dfecs)
-        evaluate_policy!(cdp, ws.X, C, ws.fec)
+        _s_wise_max_foc_sweep!(cp, C, ws.Tv, ws.X, ws.fec, ws.dfecs)
+        evaluate_policy!(cp, ws.X, C, ws.fec)
     else
-        compute_greedy!(cdp, cdp.interp.S, C, ws.X, ws.fec)
-        evaluate_policy!(cdp, ws.X, C, ws.fec)
+        compute_greedy!(cp, cp.interp.S, C, ws.X, ws.fec)
+        evaluate_policy!(cp, ws.X, C, ws.fec)
     end
     return C
 end
 
-function policy_iteration_operator!(cdp::ContinuousDP, C::Vector{Float64},
-                                    X::Vector{Float64})
-    compute_greedy!(cdp, C, X)
-    evaluate_policy!(cdp, X, C)
+function policy_iteration_operator!(cp::_CollocationProblem,
+                                    C::Vector{Float64}, X::Vector{Float64})
+    compute_greedy!(cp, C, X)
+    evaluate_policy!(cp, X, C)
     return C
 end
 
@@ -1686,7 +1697,7 @@ function solve(cdp::ContinuousDP, solver::CollocationSolver{Algo};
                v_init=nothing, verbose::Integer=2,
                print_skip::Integer=50) where {Algo<:DPAlgorithm}
     interp = Interp(solver.basis)
-    return _solve_core(_with_interp(cdp, interp), Algo,
+    return _solve_core(_CollocationProblem(cdp, interp), Algo,
                        _check_v_init(v_init, interp),
                        solver.tol, solver.max_iter, solver.inner_solver,
                        verbose, print_skip)
@@ -1695,7 +1706,7 @@ end
 function solve(cdp::ContinuousDP, solver::LQASolver;
                v_init=nothing, verbose::Integer=2, print_skip::Integer=50)
     interp = Interp(solver.basis)
-    return _solve_core(_with_interp(cdp, interp), LQA,
+    return _solve_core(_CollocationProblem(cdp, interp), LQA,
                        _check_v_init(v_init, interp),
                        sqrt(eps()), 500, :brent,
                        verbose, print_skip; point=solver.point)
@@ -1710,16 +1721,17 @@ function _check_v_init(v_init::AbstractVector, interp::Interp)
 end
 
 # Shared solve pipeline over a problem with a bound interpolation scheme
-function _solve_core(cdp::ContinuousDP{N}, ::Type{Algo},
+function _solve_core(cp::_CollocationProblem, ::Type{Algo},
                      v_init::Vector{Float64}, tol::Float64, max_iter::Int,
                      inner_solver::Symbol, verbose::Integer,
                      print_skip::Integer;
-                     kwargs...) where {Algo<:DPAlgorithm,N}
-    res = CDPSolveResult{Algo,N}(cdp, tol, max_iter, inner_solver)
+                     kwargs...) where {Algo<:DPAlgorithm}
+    res = CDPSolveResult{Algo}(cp.cdp, cp.interp, tol, max_iter,
+                               inner_solver)
     # LQA has no inner maximization: skip the FOC derivative caches
-    ws = CDPWorkspace(cdp; inner_solver=(Algo === LQA ? :brent : inner_solver))
-    ldiv!(res.C, cdp.interp.Phi_lu, v_init)
-    _solve!(cdp, res, ws, verbose, print_skip; kwargs...)
+    ws = CDPWorkspace(cp; inner_solver=(Algo === LQA ? :brent : inner_solver))
+    ldiv!(res.C, cp.interp.Phi_lu, v_init)
+    _solve!(cp, res, ws, verbose, print_skip; kwargs...)
     evaluate!(res, ws.fec)
     return res
 end
@@ -1742,13 +1754,13 @@ Policy function iteration algorithm for `solve`.
 PFI
 
 """
-    _solve!(cdp, res, ws, verbose, print_skip)
+    _solve!(cp, res, ws, verbose, print_skip)
 
 Implement policy iteration. See `solve` for further details.
 """
-function _solve!(cdp::ContinuousDP, res::CDPSolveResult{PFI},
+function _solve!(cp::_CollocationProblem, res::CDPSolveResult{PFI},
                  ws::CDPWorkspace, verbose, print_skip)
-    operator!(C) = policy_iteration_operator!(cdp, C, ws)
+    operator!(C) = policy_iteration_operator!(cp, C, ws)
     res.converged, res.num_iter =
         operator_iteration!(operator!, res.C, res.tol, res.max_iter,
                             verbose=verbose, print_skip=print_skip)
@@ -1765,13 +1777,13 @@ Value function iteration algorithm for `solve`.
 VFI
 
 """
-    _solve!(cdp, res, ws, verbose, print_skip)
+    _solve!(cp, res, ws, verbose, print_skip)
 
 Implement value iteration. See `solve` for further details.
 """
-function _solve!(cdp::ContinuousDP, res::CDPSolveResult{VFI},
+function _solve!(cp::_CollocationProblem, res::CDPSolveResult{VFI},
                  ws::CDPWorkspace, verbose, print_skip)
-    operator!(C) = bellman_operator!(cdp, C, ws)
+    operator!(C) = bellman_operator!(cp, C, ws)
     res.converged, res.num_iter =
         operator_iteration!(operator!, res.C, res.tol, res.max_iter,
                             verbose=verbose, print_skip=print_skip)
@@ -1784,20 +1796,21 @@ end
 
 Linear-quadratic approximation algorithm for `solve`.
 
-Use as `solve(cdp, LQA; point=(s, x, e))` to approximate the model around a
-reference point and solve the resulting LQ problem.
+Used via `solve(cdp, LQASolver(basis; point=(s, x, e)))` to approximate the
+model around a reference point and solve the resulting LQ problem.
 """
 struct LQA <: DPAlgorithm end
 
 """
-    _solve!(cdp, res, ws, verbose, print_skip; point)
+    _solve!(cp, res, ws, verbose, print_skip; point)
 
 Implement linear quadratic approximation. See `solve` for further details.
 """
-function _solve!(cdp::ContinuousDP,
+function _solve!(cp::_CollocationProblem,
                  res::CDPSolveResult{LQA},
                  ws::CDPWorkspace, verbose, print_skip;
                  point::Tuple{ScalarOrArray, ScalarOrArray, ScalarOrArray})
+    cdp, interp = cp.cdp, cp.interp
     cdp.actions isa ContinuousActions || throw(ArgumentError(
         "LQA requires a continuous action space"))
 
@@ -1838,10 +1851,10 @@ function _solve!(cdp::ContinuousDP,
 
     # Compute value function
     v(s) = -([1, s...]' * P * [1, s...] + d)
-    v_vals = [v(cdp.interp.S[i, :]) for i in 1:length(cdp.interp.basis)]
+    v_vals = [v(interp.S[i, :]) for i in 1:length(interp.basis)]
 
     # Back out basis coefficients
-    ldiv!(res.C, cdp.interp.Phi_lu, v_vals)
+    ldiv!(res.C, interp.Phi_lu, v_vals)
 
     res.converged = true
 end
@@ -1863,7 +1876,7 @@ struct ValueFunction{TF<:FunEvalCache}
 end
 
 ValueFunction(res::CDPSolveResult) =
-    ValueFunction(res.C, FunEvalCache(res.cdp.interp.basis))
+    ValueFunction(res.C, FunEvalCache(res.interp.basis))
 
 (vf::ValueFunction)(s) = funeval_point!(vf.fec, vf.C, s)
 
@@ -1927,7 +1940,7 @@ function PolicyFunction(res::CDPSolveResult{Algo,N}) where {Algo,N}
     a = res.cdp.actions
     if a isa DiscreteActions
         return _GreedyPolicyFunction(res.cdp, res.C,
-                                     FunEvalCache(res.cdp.interp.basis),
+                                     FunEvalCache(res.interp.basis),
                                      a.vals)
     end
     basis = Basis(map(LinParams, res.eval_nodes_coord, ntuple(i -> 0, N)))
