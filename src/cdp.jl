@@ -291,6 +291,9 @@ end
 Construct a copy of `cdp`, optionally replacing selected model components.
 The `x_lb`/`x_ub` keywords replace the corresponding bound of a continuous
 action space.
+
+The keyword `basis` is also accepted but deprecated (removal planned for
+v0.4): pass `CollocationSolver(basis)` to `solve` instead.
 """
 function ContinuousDP(cdp::ContinuousDP;
     f = cdp.f,
@@ -1625,12 +1628,17 @@ struct CollocationSolver{Algo<:DPAlgorithm,TB<:Basis}
             "linear-quadratic approximation"))
         inner_solver in (:foc, :brent) ||
             throw(ArgumentError("inner_solver must be :foc or :brent"))
-        (isfinite(tol) && tol > 0) ||
+        # Validate the converted values that are stored: Float64 conversion
+        # of an extreme Real (e.g. BigFloat) can underflow to 0.0 or
+        # overflow to Inf even when the raw value is positive and finite
+        tol_f = Float64(tol)
+        (isfinite(tol_f) && tol_f > 0) ||
             throw(ArgumentError("tol must be a positive finite number"))
+        max_iter_i = Int(max_iter)
         # max_iter == 0 is meaningful: fit v_init and iterate zero times
-        max_iter >= 0 ||
+        max_iter_i >= 0 ||
             throw(ArgumentError("max_iter must be nonnegative"))
-        return new{Algo,TB}(basis, inner_solver, Float64(tol), Int(max_iter))
+        return new{Algo,TB}(basis, inner_solver, tol_f, max_iter_i)
     end
 end
 

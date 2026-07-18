@@ -83,6 +83,11 @@ using QuantEcon: qnwlogn
         @test_throws ArgumentError CollocationSolver(basis; tol=-1e-8)
         @test_throws ArgumentError CollocationSolver(basis; tol=NaN)
         @test_throws ArgumentError CollocationSolver(basis; tol=Inf)
+        # Validation applies to the stored Float64 value: extreme BigFloat
+        # inputs that under/overflow in the conversion are rejected
+        @test_throws ArgumentError CollocationSolver(basis; tol=big"1e-5000")
+        @test_throws ArgumentError CollocationSolver(basis; tol=big"1e5000")
+
         # max_iter=0 is allowed (fit v_init, iterate zero times); only
         # negative values are rejected
         @test CollocationSolver(basis; max_iter=0).max_iter == 0
