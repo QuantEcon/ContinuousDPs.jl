@@ -750,9 +750,9 @@ are never called at infeasible actions); if no adequate step exists,
 - `H::Float64`, `Hp::Float64`: Objective value and derivative (may be
   non-finite, in which case the caller should fall back to Brent).
 """
-function _objective_and_deriv(cdp::ContinuousDP{N}, s, C, fec::FunEvalCache,
+function _objective_and_deriv(cdp::ContinuousDP, s, C, fec::FunEvalCache,
                               dfecs, x::Float64, x_lb::Float64,
-                              x_ub::Float64) where N
+                              x_ub::Float64)
     h = min(_FOC_RELSTEP * max(abs(x), 1.0), x - x_lb, x_ub - x)
     h > eps() * max(abs(x), 1.0) || return NaN, NaN
     f0 = cdp.f(s, x)
@@ -922,7 +922,7 @@ _use_foc(ws::CDPWorkspace) = ws.inner_solver == :foc && ws.dfecs !== nothing
 # differences of the user's f and g in each action dimension; any non-finite
 # intermediate makes the result non-finite, which callers treat as a signal
 # to fall back. Writes -H and -grad H (Optim minimizes).
-function _negH_multi!(G, cdp::ContinuousDP{N}, s, C, fec::FunEvalCache,
+function _negH_multi!(G, cdp::ContinuousDP, s, C, fec::FunEvalCache{N},
                       dfecs, x::Vector{Float64}, lb::Vector{Float64},
                       ub::Vector{Float64}, ::Val{M}) where {N,M}
     # Fminbox inner iterates can momentarily leave the box (the barrier
@@ -1006,9 +1006,9 @@ Brent maximization on any failure or non-finite outcome; with
 
 Writes the maximizer into `xout` and returns the maximized value.
 """
-function _s_wise_max_multi!(cdp::ContinuousDP{N}, s, C, fec::FunEvalCache,
+function _s_wise_max_multi!(cdp::ContinuousDP, s, C, fec::FunEvalCache,
                             dfecs, xout::AbstractVector{Float64},
-                            use_foc::Bool) where N
+                            use_foc::Bool)
     a = cdp.actions
     M = _action_dim(a)
     lb = collect(Float64, a.x_lb(s))
