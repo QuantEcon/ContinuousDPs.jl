@@ -257,31 +257,25 @@ function ContinuousDP(; f, g, discount, shocks, weights,
     return ContinuousDP(f, g, discount, shocks, weights, actions)
 end
 
-# Deprecated basis-endowed forms: the basis now belongs to the solver
-function ContinuousDP(f, g, discount::Real,
-                      shocks::AbstractVecOrMat, weights::Vector{Float64},
-                      actions::ActionSpace,
-                      basis::Basis{N}) where {N}
-    Base.depwarn(
-        "`ContinuousDP(f, g, discount, shocks, weights, actions, basis)` " *
-        "is deprecated: construct the problem without `basis` and pass " *
-        "`CollocationSolver(basis)` to `solve`.", :ContinuousDP)
-    return _with_interp(
-        ContinuousDP(f, g, discount, shocks, weights, actions), Interp(basis))
-end
-
-function ContinuousDP(f, g, discount::Real,
-                      shocks::AbstractVecOrMat, weights::Vector{Float64},
-                      x_lb, x_ub, basis::Basis)
-    Base.depwarn(
-        "`ContinuousDP(f, g, discount, shocks, weights, x_lb, x_ub, basis)` " *
-        "is deprecated: construct the problem without `basis` and pass " *
-        "`CollocationSolver(basis)` to `solve`.", :ContinuousDP)
-    return _with_interp(
-        ContinuousDP(f, g, discount, shocks, weights,
-                     ContinuousActions(x_lb, x_ub)),
-        Interp(basis))
-end
+# TODO(v0.5): delete these error stubs (kept for one release after the
+# removal of the basis-endowed constructors in v0.4). The 7-arg stub is
+# load-bearing beyond ergonomics: without it, the removed
+# `(..., actions, basis)` form would silently match the primitives
+# `(..., x_lb, x_ub)` method and construct a nonsense action space.
+ContinuousDP(f, g, discount::Real,
+             shocks::AbstractVecOrMat, weights::Vector{Float64},
+             actions_or_x_lb, basis::Basis) =
+    throw(ArgumentError(
+        "the basis-endowed `ContinuousDP` constructors were removed in " *
+        "v0.4: construct the problem without `basis` and pass " *
+        "`CollocationSolver(basis)` to `solve`"))
+ContinuousDP(f, g, discount::Real,
+             shocks::AbstractVecOrMat, weights::Vector{Float64},
+             x_lb, x_ub, basis::Basis) =
+    throw(ArgumentError(
+        "the basis-endowed `ContinuousDP` constructors were removed in " *
+        "v0.4: construct the problem without `basis` and pass " *
+        "`CollocationSolver(basis)` to `solve`"))
 
 """
     ContinuousDP(cdp::ContinuousDP; f=cdp.f, g=cdp.g, discount=cdp.discount,
@@ -291,9 +285,6 @@ end
 Construct a copy of `cdp`, optionally replacing selected model components.
 The `x_lb`/`x_ub` keywords replace the corresponding bound of a continuous
 action space.
-
-The keyword `basis` is also accepted but deprecated (removal planned for
-v0.4): pass `CollocationSolver(basis)` to `solve` instead.
 """
 function ContinuousDP(cdp::ContinuousDP;
     f = cdp.f,
@@ -303,8 +294,7 @@ function ContinuousDP(cdp::ContinuousDP;
     weights = cdp.weights,
     actions = cdp.actions,
     x_lb = nothing,
-    x_ub = nothing,
-    basis = nothing
+    x_ub = nothing
 )
     if x_lb !== nothing || x_ub !== nothing
         actions isa ContinuousActions || throw(ArgumentError(
@@ -315,15 +305,6 @@ function ContinuousDP(cdp::ContinuousDP;
         )
     end
     out = ContinuousDP(f, g, discount, shocks, weights, actions)
-    if basis !== nothing
-        Base.depwarn(
-            "the `basis` keyword of the ContinuousDP copy constructor is " *
-            "deprecated: pass `CollocationSolver(basis)` to `solve` instead.",
-            :ContinuousDP)
-        return _with_interp(out, Interp(basis))
-    end
-    # Preserve an interp bound by the deprecated basis-endowed constructor
-    cdp.interp === nothing || return _with_interp(out, cdp.interp)
     return out
 end
 
@@ -1743,69 +1724,13 @@ function _solve_core(cdp::ContinuousDP{N}, ::Type{Algo},
     return res
 end
 
-"""
-    solve(cdp, method=PFI; v_init=zeros(cdp.interp.length), tol=sqrt(eps()),
-          max_iter=500, verbose=2, print_skip=50, kwargs...)
-
-Deprecated `solve` method for problems constructed with the deprecated
-basis-endowed `ContinuousDP` constructor. Use
-`solve(cdp, CollocationSolver(basis; ...))` (or `LQASolver`) instead.
-
-# Arguments
-
-- `cdp::ContinuousDP`: The dynamic program to solve.
-- `method::Type{<:DPAlgorithm}`: Solution method. `VFI` for value
-  function iteration, `PFI` for policy function iteration, or `LQA` for linear
-  quadratic approximation. Default is `PFI`.
-- `v_init::Vector{Float64}`: Initial value function values at interpolation
-   nodes.
-- `tol::Real`: Convergence tolerance.
-- `max_iter::Integer`: Maximum number of iterations.
-- `verbose::Integer`: Level of feedback (0 for no output, 1 for warnings only,
-  2 for warning and convergence messages during iteration).
-- `print_skip::Integer`: If `verbose == 2`, how many iterations between print
-  messages.
-- `inner_solver::Symbol`: How to solve the inner maximization over actions
-  in VFI and PFI (`:foc` or `:brent`; see [`CollocationSolver`](@ref)).
-- `point::Tuple{ScalarOrArray, ScalarOrArray, ScalarOrArray}`: Keyword argument
-  required when `method` is `LQA`. Specify the steady state `(s, x, e)` around
-  which the LQ approximation is constructed.
-
-# Returns
-
-- `res::CDPSolveResult`: Solution object of the dynamic program.
-"""
-function solve(cdp::ContinuousDP{N}, method::Type{Algo}=PFI;
-               v_init=nothing,
-               tol::Real=sqrt(eps()), max_iter::Integer=500,
-               verbose::Integer=2,
-               print_skip::Integer=50,
-               inner_solver::Symbol=:foc,
-               kwargs...) where {Algo<:DPAlgorithm,N}
-    cdp.interp === nothing && throw(ArgumentError(
-        "this ContinuousDP holds no interpolation basis; pass a solver, " *
-        "e.g. `solve(cdp, CollocationSolver(basis))`"))
-    if Algo === LQA
-        Base.depwarn(
-            "`solve(cdp, LQA; ...)` with the basis stored in the problem " *
-            "is deprecated: construct the problem without `basis` and " *
-            "call `solve(cdp, LQASolver(basis; point=point))`.", :solve)
-    else
-        Base.depwarn(
-            "`solve(cdp, method; ...)` with the basis stored in the " *
-            "problem is deprecated: construct the problem without `basis` " *
-            "and call " *
-            "`solve(cdp, CollocationSolver(basis; algorithm=$Algo, ...))`.",
-            :solve)
-    end
-    # Validate before the LQA override in _solve_core, so that an invalid
-    # value is rejected for every method, as documented
-    inner_solver in (:foc, :brent) ||
-        throw(ArgumentError("inner_solver must be :foc or :brent"))
-    return _solve_core(cdp, Algo, _check_v_init(v_init, cdp.interp),
-                       Float64(tol), Int(max_iter), inner_solver,
-                       verbose, print_skip; kwargs...)
-end
+# TODO(v0.5): delete this error stub (kept for one release after the
+# removal of the deprecated `solve(cdp, method; ...)` in v0.4)
+solve(cdp::ContinuousDP, ::Type{<:DPAlgorithm}=PFI; kwargs...) =
+    throw(ArgumentError(
+        "`solve(cdp, PFI/VFI/LQA; ...)` was removed in v0.4: pass a " *
+        "solver object, e.g. `solve(cdp, CollocationSolver(basis))` or " *
+        "`solve(cdp, LQASolver(basis; point=point))`"))
 
 
 # Policy iteration
