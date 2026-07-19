@@ -119,8 +119,8 @@ using QuantEcon: qnwlogn
         # The removed v0.2 method form hits the instructive error stub
         @test_throws ArgumentError solve(cdp, PFI; verbose=0)
         @test_throws ArgumentError solve(cdp; verbose=0)
-        @test_throws r"was removed in v0.4" solve(cdp, PFI)
-        @test_throws r"was removed in v0.4" solve(cdp, LQA;
+        @test_throws r"has been removed" solve(cdp, PFI)
+        @test_throws r"has been removed" solve(cdp, LQA;
                                                   point=(1.0, 0.5, 1.0))
 
         # A solver is stateless: reuse across solves and problems gives
@@ -140,9 +140,9 @@ using QuantEcon: qnwlogn
         # The v0.2 basis-endowed forms hit the instructive error stubs
         # (the 7-arg form would otherwise silently match the primitives
         # `(..., x_lb, x_ub)` method)
-        @test_throws r"removed in v0\.4" ContinuousDP(
+        @test_throws r"have been removed" ContinuousDP(
             f, g, beta, shocks, weights, x_lb, x_ub, basis)
-        @test_throws r"removed in v0\.4" ContinuousDP(
+        @test_throws r"have been removed" ContinuousDP(
             f, g, beta, shocks, weights, ContinuousActions(x_lb, x_ub),
             basis)
 

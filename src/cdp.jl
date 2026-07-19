@@ -250,8 +250,8 @@ function ContinuousDP(; f, g, discount, shocks, weights,
     return ContinuousDP(f, g, discount, shocks, weights, actions)
 end
 
-# TODO(v0.5): delete these error stubs (kept for one release after the
-# removal of the basis-endowed constructors in v0.4). The 7-arg stub is
+# TODO: delete these error stubs in a later release (kept for migration
+# guidance from the v0.2 API, removed in v0.3). The 7-arg stub is
 # load-bearing beyond ergonomics: without it, the removed
 # `(..., actions, basis)` form would silently match the primitives
 # `(..., x_lb, x_ub)` method and construct a nonsense action space.
@@ -259,15 +259,15 @@ ContinuousDP(f, g, discount::Real,
              shocks::AbstractVecOrMat, weights::Vector{Float64},
              actions_or_x_lb, basis::Basis) =
     throw(ArgumentError(
-        "the basis-endowed `ContinuousDP` constructors were removed in " *
-        "v0.4: construct the problem without `basis` and pass " *
+        "the basis-endowed `ContinuousDP` constructors have been removed: " *
+        "construct the problem without `basis` and pass " *
         "`CollocationSolver(basis)` to `solve`"))
 ContinuousDP(f, g, discount::Real,
              shocks::AbstractVecOrMat, weights::Vector{Float64},
              x_lb, x_ub, basis::Basis) =
     throw(ArgumentError(
-        "the basis-endowed `ContinuousDP` constructors were removed in " *
-        "v0.4: construct the problem without `basis` and pass " *
+        "the basis-endowed `ContinuousDP` constructors have been removed: " *
+        "construct the problem without `basis` and pass " *
         "`CollocationSolver(basis)` to `solve`"))
 
 """
@@ -1736,11 +1736,11 @@ function _solve_core(cp::_CollocationProblem, ::Type{Algo},
     return res
 end
 
-# TODO(v0.5): delete this error stub (kept for one release after the
-# removal of the deprecated `solve(cdp, method; ...)` in v0.4)
+# TODO: delete this error stub in a later release (kept for migration
+# guidance from the v0.2 API, removed in v0.3)
 solve(cdp::ContinuousDP, ::Type{<:DPAlgorithm}=PFI; kwargs...) =
     throw(ArgumentError(
-        "`solve(cdp, PFI/VFI/LQA; ...)` was removed in v0.4: pass a " *
+        "`solve(cdp, PFI/VFI/LQA; ...)` has been removed: pass a " *
         "solver object, e.g. `solve(cdp, CollocationSolver(basis))` or " *
         "`solve(cdp, LQASolver(basis; point=point))`"))
 
