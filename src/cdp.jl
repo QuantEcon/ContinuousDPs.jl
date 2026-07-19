@@ -1954,8 +1954,11 @@ interpolated piecewise linearly over the evaluation nodes and clamped into
 length-`M` tuple for `M`-dimensional continuous actions.
 
 The policy data are shared with `res` at construction time: for continuous
-actions, construct after the final `set_eval_nodes!` call. Not thread-safe:
-use one instance per thread.
+actions, construct after the final `set_eval_nodes!` call. The evaluator
+machinery is allocation-free; total per-call allocations depend on the
+user-supplied functions invoked during evaluation (the action-bound
+functions for continuous actions; the reward and transition functions for
+discrete ones). Not thread-safe: use one instance per thread.
 """
 abstract type PolicyFunction end
 

@@ -44,21 +44,52 @@ using QuantEcon: qnwlogn
 
     @testset "PolicyFunction: clamping into the action bounds" begin
         # Convex upper bound: linear interpolation of bound-attaining nodal
-        # values overshoots the bound mid-interval, so the clamp must bind
-        fc(s, x) = -(x - 0.5 * s)^2
-        gc(s, x, e) = clamp(0.5 * s, 0.5, 2.0)
+        # values overshoots the bound mid-interval, so the clamp must bind.
+        # The transition function rejects infeasible actions outright, so
+        # the simulation below fails unless the clamped evaluator is used.
         x_ub_c(s) = s^2
+        fc(s, x) = -(x - 0.5 * s)^2
+        function gc(s, x, e)
+            x <= x_ub_c(s) || throw(DomainError(x, "infeasible action"))
+            return clamp(0.5 * s, 0.5, 2.0)
+        end
         cdp_c = ContinuousDP(f=fc, g=gc, discount=0.9, x_lb=s -> 0.0,
                              x_ub=x_ub_c, shocks=[0.0], weights=[1.0])
         res_c = solve(cdp_c, CollocationSolver(Basis(ChebParams(10, 0.5, 2.0)));
                       verbose=0)
         res_c.X .= x_ub_c.(res_c.eval_nodes)   # policy at the (convex) bound
-        pf_c = PolicyFunction(res_c)
         nodes = res_c.eval_nodes
         s_mid = (nodes[1] + nodes[2]) / 2
-        chord = (x_ub_c(nodes[1]) + x_ub_c(nodes[2])) / 2
-        @test chord > x_ub_c(s_mid)            # interpolation overshoots
-        @test pf_c(s_mid) == x_ub_c(s_mid)     # ... and the clamp binds
+        # the raw interpolant is infeasible at s_mid ...
+        lin_c = Basis(LinParams(res_c.eval_nodes_coord[1], 0))
+        raw = Interpoland(lin_c, res_c.X)
+        @test raw(s_mid) > x_ub_c(s_mid)
+        # ... PolicyFunction restores feasibility ...
+        pf_c = PolicyFunction(res_c)
+        @test pf_c(s_mid) == x_ub_c(s_mid)
+        # ... and simulate traverses the overshoot region without tripping
+        # the transition's feasibility check (regression: fails if simulate!
+        # returns to the unclamped interpolation path)
+        s_path = simulate(MersenneTwister(7), res_c, s_mid, 5)
+        @test all(isfinite, s_path)
+    end
+
+    @testset "PolicyFunction: 2-D state (tensor piecewise linear)" begin
+        f3(s, x) = log(x)
+        g3(s, x, e) = (clamp(s[1] - x + 0.6, 0.5, 2.0),
+                       clamp(0.5 * s[2] + 0.5, 0.5, 2.0))
+        cdp3 = ContinuousDP(f=f3, g=g3, discount=0.9, x_lb=s -> 0.01,
+                            x_ub=s -> s[1], shocks=[0.0], weights=[1.0])
+        basis3 = Basis(SplineParams(6, 0.5, 2.0, 2), SplineParams(4, 0.5, 2.0, 2))
+        res3 = solve(cdp3, CollocationSolver(basis3; algorithm=VFI,
+                                             max_iter=5); verbose=0)
+        pf3 = PolicyFunction(res3)
+        lin3 = Basis(map(LinParams, res3.eval_nodes_coord, (0, 0))...)
+        itp3 = Interpoland(lin3, res3.X)
+        for s1 in range(0.5, stop=2.0, length=7), s2 in (0.6, 1.3, 1.9)
+            s = [s1, s2]
+            @test pf3(s) ≈ clamp(itp3(s), 0.01, s1)
+        end
     end
 
     @testset "PolicyFunction: M-dimensional continuous actions" begin
@@ -78,6 +109,7 @@ using QuantEcon: qnwlogn
             @test x isa NTuple{2,Float64}
             @test collect(x) ≈ [itps[1](s), itps[2](s)]
         end
+        @test @inferred(pf2(1.0)) isa NTuple{2,Float64}
     end
 
     @testset "PolicyFunction: discrete actions (exact greedy)" begin
@@ -95,6 +127,18 @@ using QuantEcon: qnwlogn
         V, X, resid = res_d(ss)
         @test [pf_d(s) for s in ss] == X
         @test all(x -> x in x_grid, pf_d(s) for s in ss)
+        @test @inferred(pf_d(1.0)) isa Float64
+    end
+
+    @testset "inference and machinery allocations" begin
+        # Non-allocating model functions isolate the evaluator machinery
+        vf = ValueFunction(res)
+        pf = PolicyFunction(res)
+        @test @inferred(vf(1.0)) isa Float64
+        @test @inferred(pf(1.0)) isa Float64
+        vf(1.0); pf(1.0)
+        @test iszero(@allocated vf(1.0))
+        @test iszero(@allocated pf(1.0))
     end
 
     @testset "simulate uses the functor policy (regression)" begin
