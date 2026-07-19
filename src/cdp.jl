@@ -1921,6 +1921,98 @@ function _solve!(cdp::ContinuousDP,
     res.converged = true
 end
 
+#= Point evaluation of the solution: value and policy functors =#
+
+"""
+    ValueFunction(res::CDPSolveResult)
+
+Callable object evaluating the fitted value function at a single state
+point: `vf = ValueFunction(res); vf(s)`. Evaluation is non-allocating; the
+basis coefficients are shared with `res` (not copied).
+
+Not thread-safe: use one instance per thread (as with [`CDPWorkspace`](@ref)).
+"""
+struct ValueFunction{TF<:FunEvalCache}
+    C::Vector{Float64}
+    fec::TF
+end
+
+ValueFunction(res::CDPSolveResult) =
+    ValueFunction(res.C, FunEvalCache(res.cdp.interp.basis))
+
+(vf::ValueFunction)(s) = funeval_point!(vf.fec, vf.C, s)
+
+"""
+    PolicyFunction(res::CDPSolveResult)
+
+Callable object evaluating the policy function at a single state point:
+`pf = PolicyFunction(res); pf(s)`. For a discrete action space, the greedy
+action is recomputed exactly at `s` (a discrete policy is never
+interpolated); for a continuous action space, the policy values `res.X` are
+interpolated piecewise linearly over the evaluation nodes and clamped into
+`[x_lb(s), x_ub(s)]`. Returns an action value for scalar actions and a
+length-`M` tuple for `M`-dimensional continuous actions.
+
+The policy data are shared with `res` at construction time: for continuous
+actions, construct after the final `set_eval_nodes!` call. The evaluator
+machinery is allocation-free; total per-call allocations depend on the
+user-supplied functions invoked during evaluation (the action-bound
+functions for continuous actions; the reward and transition functions for
+discrete ones). Not thread-safe: use one instance per thread.
+"""
+abstract type PolicyFunction end
+
+# Discrete actions: exact greedy recomputation at the evaluation point
+struct _GreedyPolicyFunction{TCDP<:ContinuousDP,TF<:FunEvalCache,
+                             TV<:AbstractVector} <: PolicyFunction
+    cdp::TCDP
+    C::Vector{Float64}
+    fec::TF
+    vals::TV
+end
+
+(pf::_GreedyPolicyFunction)(s) =
+    pf.vals[_s_wise_max_discrete!(pf.cdp, s, pf.C, pf.fec)[2]]
+
+# Continuous actions: piecewise-linear interpolation of the nodal policy
+# values, evaluated with the non-allocating point kernel. For a piecewise
+# linear basis with breakpoints at the evaluation nodes, the interpolant's
+# coefficients coincide with the nodal values, so `res.X` is used as the
+# coefficient array directly.
+struct _InterpPolicyFunction{M,TA<:ContinuousActions,TF<:FunEvalCache,
+                             TX<:AbstractVecOrMat} <: PolicyFunction
+    actions::TA
+    X::TX
+    fec::TF
+end
+
+function (pf::_InterpPolicyFunction{1})(s)
+    x = funeval_point!(pf.fec, pf.X, s)
+    return clamp(x, pf.actions.x_lb(s), pf.actions.x_ub(s))
+end
+
+function (pf::_InterpPolicyFunction{M})(s) where {M}
+    lb, ub = pf.actions.x_lb(s), pf.actions.x_ub(s)
+    return ntuple(
+        d -> clamp(funeval_point!(pf.fec, view(pf.X, :, d), s), lb[d], ub[d]),
+        Val(M))
+end
+
+function PolicyFunction(res::CDPSolveResult{Algo,N}) where {Algo,N}
+    a = res.cdp.actions
+    if a isa DiscreteActions
+        return _GreedyPolicyFunction(res.cdp, res.C,
+                                     FunEvalCache(res.cdp.interp.basis),
+                                     a.vals)
+    end
+    basis = Basis(map(LinParams, res.eval_nodes_coord, ntuple(i -> 0, N)))
+    fec = FunEvalCache(basis)
+    M = _action_dim(a)
+    return _InterpPolicyFunction{M,typeof(a),typeof(fec),typeof(res.X)}(
+        a, res.X, fec)
+end
+
+
 #= Simulate methods =#
 
 """
@@ -1950,24 +2042,10 @@ function simulate!(rng::AbstractRNG, s_path::VecOrMat,
         e_ind[t] = searchsortedlast(cdf, r[t]) + 1
     end
 
-    # Policy lookup: for a discrete action space, recompute the greedy
-    # action exactly at each visited state (interpolating a discrete policy
-    # is meaningless); for a continuous one, interpolate the policy values
-    if res.cdp.actions isa DiscreteActions
-        fec = FunEvalCache(res.cdp.interp.basis)
-        policy = s -> res.cdp.actions.vals[
-            _s_wise_max_discrete!(res.cdp, s, res.C, fec)[2]]
-    elseif res.cdp.actions isa ContinuousActions &&
-           _action_dim(res.cdp.actions) > 1
-        basis = Basis(map(LinParams, res.eval_nodes_coord, ntuple(i -> 0, N)))
-        M = _action_dim(res.cdp.actions)
-        itps = ntuple(d -> Interpoland(basis, res.X[:, d]), M)
-        policy = s -> map(itp -> itp(s), itps)  # map over a tuple: a tuple
-    else
-        basis = Basis(map(LinParams, res.eval_nodes_coord, ntuple(i -> 0, N)))
-        X_interp = Interpoland(basis, res.X)
-        policy = s -> X_interp(s)
-    end
+    # Policy lookup: exact greedy recomputation for a discrete action
+    # space, piecewise-linear interpolation (with clamping into the action
+    # bounds) for a continuous one; see PolicyFunction
+    policy = PolicyFunction(res)
 
     s_ind_front = Base.front(axes(s_path))
     e_ind_tail = Base.tail(axes(res.cdp.shocks))
