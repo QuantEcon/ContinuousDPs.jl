@@ -51,8 +51,8 @@ To solve the problem, first construct a `ContinuousDP` instance by passing
 the primitives of the model:
 
 ```Julia
-cdp = ContinuousDP(f=f, g=g, discount=discount, shocks=shocks,
-                   weights=weights, x_lb=x_lb, x_ub=x_ub)
+cdp = ContinuousDP(f=f, g=g, discount=discount, x_lb=x_lb, x_ub=x_ub,
+                   shocks=shocks, weights=weights)
 ```
 where
 - `f`, `g`, `x_lb`, and `x_ub` are callable objects that represent the reward
@@ -116,8 +116,8 @@ p = OptimalGrowthModel()
 shocks, weights = qnwlogn(7, p.mu, p.sigma^2)
 
 # Construct the DP with the model primitives
-cdp = ContinuousDP(f=p.f, g=p.g, discount=p.beta, shocks=shocks,
-                   weights=weights, x_lb=p.x_lb, x_ub=p.x_ub);
+cdp = ContinuousDP(f=p.f, g=p.g, discount=p.beta, x_lb=p.x_lb, x_ub=p.x_ub,
+                   shocks=shocks, weights=weights);
 
 # Solve by collocation with a Chebyshev basis from BasisMatrices.jl
 basis = Basis(ChebParams(30, p.s_min, p.s_max))

@@ -205,8 +205,8 @@ struct ContinuousDP{N,Tf,Tg,TR<:AbstractVecOrMat,TA<:ActionSpace,
 end
 
 """
-    ContinuousDP(; f, g, discount, shocks, weights, x_lb, x_ub)
-    ContinuousDP(; f, g, discount, shocks, weights, actions)
+    ContinuousDP(; f, g, discount, x_lb, x_ub, shocks, weights)
+    ContinuousDP(; f, g, discount, actions, shocks, weights)
     ContinuousDP(f, g, discount, shocks, weights, actions)
     ContinuousDP(f, g, discount, shocks, weights, x_lb, x_ub)
 
@@ -221,11 +221,11 @@ Give either `actions`, or both `x_lb` and `x_ub` (equivalent to
 - `f`: Reward function `f(s, x)`.
 - `g`: State transition function `g(s, x, e)`.
 - `discount::Real`: Discount factor.
-- `shocks::AbstractVecOrMat`: Discretized shock nodes.
-- `weights::Vector{Float64}`: Probability weights for the shock nodes.
 - `actions::ActionSpace`: Action space; alternatively give `x_lb`, `x_ub`
   (lower and upper bound of the action as functions of the state) for a
   one-dimensional continuous action space.
+- `shocks::AbstractVecOrMat`: Discretized shock nodes.
+- `weights::Vector{Float64}`: Probability weights for the shock nodes.
 """
 function ContinuousDP(f, g, discount::Real,
                       shocks::AbstractVecOrMat, weights::Vector{Float64},
