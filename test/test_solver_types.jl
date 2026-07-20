@@ -57,6 +57,11 @@ using QuantEcon: qnwlogn
 
         # The state dimension is not defined without a solver
         @test_throws MethodError ndims(cdp)
+
+        # weights must have one entry per shock node
+        @test_throws r"one weight per shock node" ContinuousDP(
+            f=f, g=g, discount=beta, shocks=shocks, weights=[0.5, 0.5],
+            x_lb=x_lb, x_ub=x_ub)
     end
 
     @testset "CollocationSolver construction" begin

@@ -122,7 +122,7 @@ ALWAYS run these validation steps after making changes:
 
 ### Action spaces (`src/cdp.jl`)
 - `ContinuousDP` stores an `actions::ActionSpace`: `ContinuousActions(x_lb, x_ub)` (one-dimensional box; the legacy positional `x_lb, x_ub` constructor arguments wrap into this), `ContinuousActions{M}(x_lb, x_ub)` (M-dimensional box with length-M tuple- or vector-valued bounds; actions passed to `f`/`g` as length-M indexable collections; policies stored as `n x M` matrices), or `DiscreteActions(vals)` (finite set of action values of any homogeneous type).
-- Discrete actions follow the QuantEcon `MarkovChain`/`state_values` convention: solvers work with indices internally (`ws.X_ind`, `res.X_ind`); `res.X` exposes the corresponding values. The inner problem is solved by exact enumeration; `inner_solver` is ignored. Infeasible state-action pairs are expressed by `f` returning `-Inf`.
+- Discrete actions follow the QuantEcon `MarkovChain`/`state_values` convention: solvers work with indices internally (`ws.X_ind`, `res.X_ind`); `res.X` exposes the corresponding values. The inner problem is solved by exact enumeration; `inner_solver` is ignored. Infeasible state-action pairs are expressed by `f` returning `-Inf`, but `g` must remain evaluable at every pair: at all-infeasible nodes the stored fallback (first) action reaches `g` through policy evaluation.
 - `simulate` recomputes the greedy action exactly at each visited state for discrete actions (a discrete policy must not be interpolated); continuous actions keep policy interpolation.
 - LQA requires a continuous action space (`ArgumentError` otherwise).
 

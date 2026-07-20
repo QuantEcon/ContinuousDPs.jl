@@ -129,7 +129,9 @@ with the *indices* into `vals`, and the solution exposes both the values
 `MarkovChain`/`state_values` convention of QuantEcon.
 
 Infeasible state-action pairs are expressed by the reward function returning
-`-Inf`.
+`-Inf`. The transition function `g` must nevertheless remain evaluable at
+every such pair: at a state where *every* action is infeasible, the solvers
+store the first action as a fallback, and policy evaluation calls `g` there.
 
 # Fields
 
@@ -196,6 +198,16 @@ struct ContinuousDP{Tf,Tg,TR<:AbstractVecOrMat,TA<:ActionSpace}
     shocks::TR
     weights::Vector{Float64}
     actions::TA
+
+    # The explicit inner constructor suppresses the implicit outer one,
+    # which would otherwise be more specific than (and shadow) the
+    # validating positional constructor below whenever `discount` is
+    # already a Float64
+    function ContinuousDP{Tf,Tg,TR,TA}(
+            f, g, discount, shocks, weights, actions
+        ) where {Tf,Tg,TR<:AbstractVecOrMat,TA<:ActionSpace}
+        return new{Tf,Tg,TR,TA}(f, g, discount, shocks, weights, actions)
+    end
 end
 
 """
@@ -224,6 +236,9 @@ Give either `actions`, or both `x_lb` and `x_ub` (equivalent to
 function ContinuousDP(f, g, discount::Real,
                       shocks::AbstractVecOrMat, weights::Vector{Float64},
                       actions::ActionSpace)
+    length(weights) == size(shocks, 1) || throw(ArgumentError(
+        "`weights` must have one weight per shock node " *
+        "($(size(shocks, 1))); got $(length(weights))"))
     return ContinuousDP{typeof(f),typeof(g),typeof(shocks),typeof(actions)}(
         f, g, Float64(discount), shocks, weights, actions)
 end
