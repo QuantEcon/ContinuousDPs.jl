@@ -2,7 +2,7 @@ using ContinuousDPs: CollocationSolver, CDPWorkspace, FunEvalCache,
                      _colloc, _build_kernel, _forces_brent, _objective,
                      _StateWeights, _StateActionWeights, bellman_operator!,
                      _check_sampling_weights, _TransitionKernel
-using BasisMatrices: Basis, ChebParams, funeval
+using BasisMatrices: Basis, ChebParams, SplineParams, funeval
 using QuantEcon: qnwlogn
 using StaticArrays: SVector
 
@@ -59,6 +59,49 @@ function ContinuousDPs._foreach_branch(f, ker::ListTestKernel, s, x,
         f(ContinuousDPs._branch_state(q, s, x, j), w[j], args...)
     end
     return nothing
+end
+
+# A kernel with genuinely (s, x)-dependent support: one certain branch
+# below the threshold state, two branches with an action-dependent split
+# above it. Implements only the general contract, with an independently
+# written _draw_next_state; exercises what distinguishes the general
+# tier from callable weights over fixed shock nodes.
+struct TwoRegimeKernel <: ContinuousDPs._TransitionKernel
+    thresh::Float64
+    lo::Float64
+    hi::Float64
+end
+
+_tr_p(ker::TwoRegimeKernel, s, x) = 0.3 + 0.4 * clamp(x / ker.hi, 0.0, 1.0)
+_tr_low(ker::TwoRegimeKernel, s, x) = clamp(s + 0.5, ker.lo, ker.hi)
+_tr_up1(ker::TwoRegimeKernel, s, x) = clamp(0.7 * s, ker.lo, ker.hi)
+_tr_up2(ker::TwoRegimeKernel, s, x) =
+    clamp(1.1 * s + 0.1 * x, ker.lo, ker.hi)
+
+function ContinuousDPs._branch_sum(f, ker::TwoRegimeKernel, s, x, args...)
+    s < ker.thresh && return f(_tr_low(ker, s, x), 1.0, args...)
+    p = _tr_p(ker, s, x)
+    return f(_tr_up1(ker, s, x), p, args...) +
+           f(_tr_up2(ker, s, x), 1 - p, args...)
+end
+
+function ContinuousDPs._foreach_branch(f, ker::TwoRegimeKernel, s, x,
+                                       args...)
+    if s < ker.thresh
+        f(_tr_low(ker, s, x), 1.0, args...)
+    else
+        p = _tr_p(ker, s, x)
+        f(_tr_up1(ker, s, x), p, args...)
+        f(_tr_up2(ker, s, x), 1 - p, args...)
+    end
+    return nothing
+end
+
+function ContinuousDPs._draw_next_state(rng::ContinuousDPs.Random.AbstractRNG,
+                                        ker::TwoRegimeKernel, s, x)
+    s < ker.thresh && return _tr_low(ker, s, x)
+    return rand(rng) <= _tr_p(ker, s, x) ? _tr_up1(ker, s, x) :
+                                           _tr_up2(ker, s, x)
 end
 
 @testset "Callable shock weights" begin
@@ -476,5 +519,64 @@ end
         cdp_nothing = ContinuousDP(cdp_trunc; weights=s -> nothing)
         @test_throws r"indexable collection" solve(
             cdp_nothing, CollocationSolver(basis); verbose=0)
+    end
+
+    @testset "dynamic-support general kernel" begin
+        ker = TwoRegimeKernel(1.5, s_min, s_max)
+        cdp_k = ContinuousDP(f=f, g=nothing, discount=beta,
+                             shocks=Float64[], weights=ker,
+                             x_lb=x_lb, x_ub=x_ub)
+
+        res = solve(cdp_k, CollocationSolver(basis); verbose=0)
+        @test res.converged
+
+        # Expected value agrees with the hand-written two-regime sum
+        fec = FunEvalCache(basis)
+        C = res.C
+        V(sp) = funeval(C, basis, [sp])[1]
+        for s in (0.5, 1.7, 3.2), x in (0.3 * s, 0.6 * s)
+            ref = s < ker.thresh ? V(_tr_low(ker, s, x)) :
+                _tr_p(ker, s, x) * V(_tr_up1(ker, s, x)) +
+                (1 - _tr_p(ker, s, x)) * V(_tr_up2(ker, s, x))
+            @test ContinuousDPs._expected_value(ker, fec, C, s, x) ≈
+                  ref rtol=1e-12
+        end
+
+        # PFI (dense policy-system assembly through the traversal) and
+        # VFI agree; a spline basis exercises the sparse assembly
+        res_vfi = solve(cdp_k, CollocationSolver(basis; algorithm=VFI,
+                                                 max_iter=2000);
+                        verbose=0)
+        @test res_vfi.converged
+        @test maximum(abs, res.C - res_vfi.C) < 1e-5
+        basis_sp = Basis(SplineParams(
+            collect(range(s_min, s_max, length=25)), 0, 3))
+        res_sp = solve(cdp_k, CollocationSolver(basis_sp); verbose=0)
+        @test res_sp.converged
+
+        # Simulation follows the same support and probabilities: every
+        # step lands on a branch of the current regime, and both upper
+        # branches occur
+        path = simulate(ContinuousDPs.Random.Xoshiro(11), res, 1.0, 200)
+        pf = ContinuousDPs.PolicyFunction(res)
+        up1 = up2 = 0
+        for t in 1:199
+            s, sp = path[t], path[t + 1]
+            x = pf(s)
+            if s < ker.thresh
+                @test sp == _tr_low(ker, s, x)
+            else
+                @test sp in (_tr_up1(ker, s, x), _tr_up2(ker, s, x))
+                up1 += sp == _tr_up1(ker, s, x)
+                up2 += sp == _tr_up2(ker, s, x)
+            end
+        end
+        @test up1 > 0
+        @test up2 > 0
+
+        # LQA linearizes cdp.g, which an injected kernel replaces:
+        # rejected with an informative error
+        @test_throws r"ready-made transition kernel" solve(
+            cdp_k, LQASolver(basis; point=(1.0, 0.4, 1.0)))
     end
 end

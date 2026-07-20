@@ -10,23 +10,22 @@ The general contract is:
 - `_branch_sum(f, ker, s, x, args...)`: return the sum of
   `f(s', w, args...)` over the branches at `(s, x)`;
 - `_foreach_branch(f, ker, s, x, args...)`: call `f(s', w, args...)` on
-  each branch at `(s, x)` (the intended seam for side-effecting
-  consumers such as a future generic policy-assembly path);
+  each branch at `(s, x)` (for side-effecting consumers such as
+  policy-system row assembly);
+- `_draw_next_state(rng, ker, s, x)`: draw a next state from the branch
+  distribution — required only when `simulate!` support is desired;
 - `_forces_brent(ker)`: whether the first-order-condition inner solver
   must fall back to Brent. Defaults to `true`: the FOC paths additionally
   require the indexed access described under [`_QuadratureKernel`](@ref),
   which a general kernel need not provide.
 
-These operations suffice for the generic Bellman expectation
-(`_expected_value`), Brent maximization, and discrete-action
-enumeration. They do NOT yet cover policy-system assembly or simulation:
-both currently consume the structured tier only (`_policy_system_lu`
-assembles rows with the indexed primitives directly, and `simulate!`
-draws a branch index with the `_QuadratureKernel` helper
-`_draw_branch_index` and maps it into the shock nodes). A general-kernel
-sampling hook — a `_draw_next_state` returning the next state itself,
-since a general kernel need not expose stable branch indices — is to be
-introduced together with its first consumer.
+These operations cover the generic Bellman expectation
+(`_expected_value`), Brent maximization, discrete-action enumeration,
+policy-evaluation system assembly (`_append_state_rows!` via
+`_foreach_branch`), and — when `_draw_next_state` is implemented —
+simulation. A general kernel need not expose stable branch indices:
+`_draw_branch_index` is a helper of the structured `_QuadratureKernel`,
+not part of this contract.
 
 In the traversals, `f` is a top-level function and `args` its explicit
 payload. This avoids a capturing closure (which would materialize on the
@@ -223,7 +222,10 @@ use instead of silently truncating the branch loop.
 """
 function _validate_weights(cp::_CollocationProblem)
     cdp = cp.cdp
-    cdp.weights isa AbstractVector && return nothing
+    # Fixed weights are validated at construction; a ready-made kernel
+    # owns its transition law and nothing is probed
+    (cdp.weights isa AbstractVector ||
+     cdp.weights isa _TransitionKernel) && return nothing
     s_probe = _row(cp.interp.S, 1)
     x_probe = _probe_action(cdp.actions, s_probe)
     ker = _build_kernel(cdp, s_probe, x_probe)

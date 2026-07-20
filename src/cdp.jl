@@ -1306,6 +1306,13 @@ function _solve!(cp::_CollocationProblem,
     cdp, interp = cp.cdp, cp.interp
     cdp.actions isa ContinuousActions || throw(ArgumentError(
         "LQA requires a continuous action space"))
+    # LQA linearizes cdp.g around the approximation point; an injected
+    # ready-made kernel replaces g and the shock representation entirely
+    # (g may be absent or stale), so there is nothing valid to linearize
+    cdp.weights isa _TransitionKernel && throw(ArgumentError(
+        "LQA requires the structured (g, shocks, weights) primitives; " *
+        "a problem carrying a ready-made transition kernel is not " *
+        "supported"))
 
     # Unpack point
     s_star, x_star, e_star = point
