@@ -159,7 +159,7 @@
                                            max_iter=500, tol=sqrt(eps()))
                 res = @inferred solve(cdp, solver, verbose=0)
                 @test ndims(res) == 2
-                @test ndims(res.cdp) == 2
+                @test ndims(ContinuousDPs._colloc(res)) == 2
 
                 results[test_name] = res
                 x_hat = vec(res.X)

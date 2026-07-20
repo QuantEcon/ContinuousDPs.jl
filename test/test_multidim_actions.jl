@@ -60,7 +60,7 @@ using ContinuousDPs: CDPWorkspace
     actions = ContinuousActions{2}(x_lb2, x_ub2)
     cdp2 = ContinuousDP(f2c, g2c, beta, shocks, weights, actions)
     # Bound instance for tests of internal functions
-    colloc_cdp2 = ContinuousDPs._with_interp(cdp2, ContinuousDPs.Interp(basis))
+    colloc_cdp2 = ContinuousDPs._CollocationProblem(cdp2, ContinuousDPs.Interp(basis))
 
     S = nodes(basis)[1]
     v_star_on_S = v_star.(view(S, :, 1), view(S, :, 2))
@@ -159,7 +159,7 @@ using ContinuousDPs: CDPWorkspace
         fec = ContinuousDPs.FunEvalCache(basis)
         for i in (1, 40, 100)
             xout = fill(NaN, 2)
-            ContinuousDPs._s_wise_max_multi!(colloc_cdp2, S[i, :],
+            ContinuousDPs._s_wise_max_multi!(colloc_cdp2.cdp, S[i, :],
                                              res_b.C, fec, nothing, xout,
                                              false)
             @test xout == res_b.X[i, :]

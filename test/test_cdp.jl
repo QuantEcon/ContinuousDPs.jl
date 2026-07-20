@@ -86,9 +86,9 @@
         end
 
         @testset "Test type inference" begin
-            interp_fact(res) = res.cdp.interp.Phi_lu
+            interp_fact(res) = res.interp.Phi_lu
             transition_fun(res) = res.cdp.g
-            interp_basis(res) = res.cdp.interp.basis
+            interp_basis(res) = res.interp.basis
 
             res = @inferred solve(cdp, CollocationSolver(bases[1]))
 

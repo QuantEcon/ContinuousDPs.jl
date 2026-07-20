@@ -20,7 +20,7 @@ using BenchmarkTools
 using ContinuousDPs
 using ContinuousDPs:
     _s_wise_max!, bellman_operator!, compute_greedy!, evaluate_policy!,
-    FunEvalCache, CDPWorkspace, DiscreteActions, Interp, _with_interp
+    FunEvalCache, CDPWorkspace, DiscreteActions, Interp, _CollocationProblem
 using BasisMatrices: Basis, ChebParams, SplineParams
 using QuantEcon: qnwlogn, qnwnorm
 
@@ -131,7 +131,7 @@ for (label, cdp, basis) in cases
     # the internal operators work on a problem with a bound interpolation
     # scheme
     res = solve(cdp, solver_pfi; verbose=0)
-    colloc_cdp = _with_interp(cdp, Interp(basis))
+    colloc_cdp = _CollocationProblem(cdp, Interp(basis))
     C0 = copy(res.C)
     X0 = copy(res.X)
     n = colloc_cdp.interp.length
@@ -141,7 +141,7 @@ for (label, cdp, basis) in cases
     s_mid = N == 1 ? colloc_cdp.interp.S[div(n, 2)] : colloc_cdp.interp.S[div(n, 2), :]
     fec = FunEvalCache(colloc_cdp.interp.basis)
     grp["s_wise_max_one_state"] =
-        @benchmarkable _s_wise_max!($colloc_cdp, $s_mid, $C0, $fec)
+        @benchmarkable _s_wise_max!($(colloc_cdp.cdp), $s_mid, $C0, $fec)
 
     # State loops over the kernel, using a preallocated workspace
     ws = CDPWorkspace(colloc_cdp)
@@ -185,7 +185,7 @@ let
     grp["solve_VFI_50iter"] =
         @benchmarkable solve($cdp, $solver_vfi; verbose=0)
     res = solve(cdp, solver_pfi; verbose=0)
-    colloc_cdp = _with_interp(cdp, Interp(basis))
+    colloc_cdp = _CollocationProblem(cdp, Interp(basis))
     C0 = copy(res.C)
     ws = CDPWorkspace(colloc_cdp)
     grp["bellman_operator"] = @benchmarkable bellman_operator!(
@@ -227,7 +227,7 @@ let
     grp["solve_VFI_50iter"] =
         @benchmarkable solve($cdp, $solver_vfi; verbose=0)
     res = solve(cdp, solver_pfi; verbose=0)
-    colloc_cdp = _with_interp(cdp, Interp(basis))
+    colloc_cdp = _CollocationProblem(cdp, Interp(basis))
     C0 = copy(res.C)
     ws = CDPWorkspace(colloc_cdp)
     grp["bellman_operator"] = @benchmarkable bellman_operator!(

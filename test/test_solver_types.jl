@@ -15,7 +15,8 @@ using QuantEcon: qnwlogn
         # Keyword form (canonical)
         cdp = ContinuousDP(f=f, g=g, discount=beta, shocks=shocks,
                            weights=weights, x_lb=x_lb, x_ub=x_ub)
-        @test cdp.interp === nothing
+        # A ContinuousDP holds primitives only
+        @test !(:interp in fieldnames(ContinuousDP))
         @test cdp.discount == beta
         @test cdp.actions isa ContinuousActions{1}
 
@@ -28,10 +29,10 @@ using QuantEcon: qnwlogn
         # Positional forms
         cdp_p = @inferred ContinuousDP(f, g, beta, shocks, weights, x_lb,
                                        x_ub)
-        @test cdp_p.interp === nothing
+        @test cdp_p isa ContinuousDP
         cdp_p2 = @inferred ContinuousDP(f, g, beta, shocks, weights,
                                         ContinuousActions(x_lb, x_ub))
-        @test cdp_p2.interp === nothing
+        @test cdp_p2 isa ContinuousDP
 
         # Exclusivity of `actions` and `x_lb`/`x_ub`
         @test_throws ArgumentError ContinuousDP(
@@ -53,10 +54,9 @@ using QuantEcon: qnwlogn
                                 actions=DiscreteActions(x_grid))
         @test cdp_disc.actions isa DiscreteActions
         @test cdp_disc.actions.vals == x_grid
-        @test cdp_disc.interp === nothing
 
-        # The state dimension is not known without a solver
-        @test_throws ArgumentError ndims(cdp)
+        # The state dimension is not defined without a solver
+        @test_throws MethodError ndims(cdp)
     end
 
     @testset "CollocationSolver construction" begin
@@ -107,18 +107,21 @@ using QuantEcon: qnwlogn
     @testset "solve with a solver object" begin
         res = @inferred solve(cdp, CollocationSolver(basis); verbose=0)
         @test res.converged
-        # The bound problem is stored in the result
-        @test res.cdp.interp !== nothing
-        @test ndims(res.cdp) == 1
+        # The problem and the interpolation scheme are stored in the result
+        @test res.cdp isa ContinuousDP
+        @test res.interp isa ContinuousDPs.Interp
         @test ndims(res) == 1
 
         # v_init length validation
         @test_throws ArgumentError solve(cdp, CollocationSolver(basis);
                                          v_init=zeros(3), verbose=0)
 
-        # A primitives-only problem cannot be solved without a solver
+        # The removed v0.2 method form hits the instructive error stub
         @test_throws ArgumentError solve(cdp, PFI; verbose=0)
         @test_throws ArgumentError solve(cdp; verbose=0)
+        @test_throws r"has been removed" solve(cdp, PFI)
+        @test_throws r"has been removed" solve(cdp, LQA;
+                                                  point=(1.0, 0.5, 1.0))
 
         # A solver is stateless: reuse across solves and problems gives
         # results identical to fresh solves (Interp is built per call)
@@ -133,75 +136,40 @@ using QuantEcon: qnwlogn
         @test res3.C != res1.C
     end
 
-    @testset "deprecated API agrees exactly with the new API" begin
-        cdp_old = @test_deprecated ContinuousDP(f, g, beta, shocks, weights,
-                                                x_lb, x_ub, basis)
-        @test cdp_old.interp !== nothing
-        @test ndims(cdp_old) == 1
-
-        for (algo, inner) in ((PFI, :foc), (VFI, :brent))
-            # The warning must recommend CollocationSolver for PFI/VFI
-            res_old = @test_deprecated r"CollocationSolver" solve(
-                cdp_old, algo; verbose=0, inner_solver=inner)
-            res_new = solve(cdp, CollocationSolver(basis; algorithm=algo,
-                                                   inner_solver=inner);
-                            verbose=0)
-            @test res_old.C == res_new.C
-            @test res_old.V == res_new.V
-            @test res_old.X == res_new.X
-            @test res_old.resid == res_new.resid
-        end
-
-        # LQA: old kwarg path vs LQASolver; the warning must recommend
-        # LQASolver (CollocationSolver rejects algorithm=LQA)
-        point = (1.0, 0.5, 1.0)
-        res_lqa_old = @test_deprecated r"LQASolver" solve(
-            cdp_old, LQA; point=point, verbose=0)
-        res_lqa_new = solve(cdp, LQASolver(basis; point=point); verbose=0)
-        @test res_lqa_old.C == res_lqa_new.C
-        @test res_lqa_old.V == res_lqa_new.V
-        @test res_lqa_old.X == res_lqa_new.X
-        @test res_lqa_old.resid == res_lqa_new.resid
-
-        # The explicitly supplied solver's basis wins over a basis stored
-        # by the deprecated constructor
-        basis_b = Basis(ChebParams(12, s_min, s_max))
-        res_b_old = solve(cdp_old, CollocationSolver(basis_b); verbose=0)
-        res_b_new = solve(cdp, CollocationSolver(basis_b); verbose=0)
-        @test res_b_old.cdp.interp.basis === basis_b
-        @test length(res_b_old.C) == 12
-        @test res_b_old.C == res_b_new.C
-        @test res_b_old.V == res_b_new.V
-
-        # Deprecated ActionSpace-and-basis form
-        cdp_old2 = @test_deprecated ContinuousDP(
+    @testset "removed basis-endowed constructors" begin
+        # The v0.2 basis-endowed forms hit the instructive error stubs
+        # (the 7-arg form would otherwise silently match the primitives
+        # `(..., x_lb, x_ub)` method)
+        @test_throws r"have been removed" ContinuousDP(
+            f, g, beta, shocks, weights, x_lb, x_ub, basis)
+        @test_throws r"have been removed" ContinuousDP(
             f, g, beta, shocks, weights, ContinuousActions(x_lb, x_ub),
             basis)
-        @test cdp_old2.interp !== nothing
+
+        # The solver's basis determines the approximation
+        basis_b = Basis(ChebParams(12, s_min, s_max))
+        res_b = solve(cdp, CollocationSolver(basis_b); verbose=0)
+        @test res_b.interp.basis === basis_b
+        @test length(res_b.C) == 12
     end
 
     @testset "copy constructor" begin
         # Primitives copy stays primitives
         cdp2 = @inferred ContinuousDP(cdp)
-        @test cdp2.interp === nothing
         @test cdp2.discount == cdp.discount
         @test cdp2.shocks == cdp.shocks
         @test cdp2.weights == cdp.weights
 
         cdp3 = ContinuousDP(cdp; discount=0.9)
         @test cdp3.discount == 0.9
-        @test cdp3.interp === nothing
 
-        # An interp bound by the deprecated constructor is preserved
-        cdp_old = @test_deprecated ContinuousDP(f, g, beta, shocks, weights,
-                                                x_lb, x_ub, basis)
-        cdp4 = ContinuousDP(cdp_old; discount=0.9)
-        @test cdp4.interp !== nothing
+        # The removed basis keyword is rejected
+        @test_throws MethodError ContinuousDP(cdp; basis=basis)
+
+        # The problem stored in a result copies like any other
+        res = solve(cdp, CollocationSolver(basis); verbose=0)
+        cdp4 = ContinuousDP(res.cdp; discount=0.9)
+        @test cdp4 isa ContinuousDP
         @test cdp4.discount == 0.9
-
-        # The basis keyword is deprecated but functional
-        cdp5 = @test_deprecated ContinuousDP(cdp; basis=basis)
-        @test cdp5.interp !== nothing
-        @test ndims(cdp5) == 1
     end
 end

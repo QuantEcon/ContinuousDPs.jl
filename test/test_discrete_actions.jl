@@ -20,7 +20,7 @@ using ContinuousDPs: CDPWorkspace, FunEvalCache, _s_wise_max_discrete!
     cdp_c = ContinuousDP(f_growth, g_growth, beta, shocks, weights,
                          s -> 1e-3, s -> s^alpha - s_min)
     # Bound instance for tests of internal functions
-    colloc_cdp_d = ContinuousDPs._with_interp(cdp_d, ContinuousDPs.Interp(basis))
+    colloc_cdp_d = ContinuousDPs._CollocationProblem(cdp_d, ContinuousDPs.Interp(basis))
 
     @testset "solve and compare with the continuous solution: $method" for
             method in (PFI, VFI)

@@ -46,14 +46,15 @@ using QuantEcon: qnwlogn
         # Brent
         res = solve(cdp, CollocationSolver(basis; inner_solver=:foc),
                     verbose=0)
-        colloc_cdp = res.cdp
+        colloc_cdp = ContinuousDPs._colloc(res)
         ws = CDPWorkspace(colloc_cdp)
         foreach(dfec -> set_coefs!(dfec, res.C), ws.dfecs)
         for i in 1:colloc_cdp.interp.length
             s = colloc_cdp.interp.S[i]
-            v_foc, x_foc = _s_wise_max_foc!(colloc_cdp, s, res.C, ws.fec, ws.dfecs,
-                                            NaN)
-            v_brent, x_brent = _s_wise_max!(colloc_cdp, s, res.C, ws.fec)
+            v_foc, x_foc = _s_wise_max_foc!(colloc_cdp.cdp, s, res.C,
+                                            ws.fec, ws.dfecs, NaN)
+            v_brent, x_brent = _s_wise_max!(colloc_cdp.cdp, s, res.C,
+                                            ws.fec)
             @test v_foc ≈ v_brent rtol=1e-8
             @test x_foc ≈ x_brent atol=1e-6
         end
@@ -88,11 +89,11 @@ using QuantEcon: qnwlogn
         res = solve(cdp_c, CollocationSolver(Basis(ChebParams(10, 0.1, 2.0));
                                              inner_solver=:foc), verbose=0)
         @test res.converged
-        colloc_cdp = res.cdp
+        colloc_cdp = ContinuousDPs._colloc(res)
         ws = CDPWorkspace(colloc_cdp)
         foreach(dfec -> set_coefs!(dfec, res.C), ws.dfecs)
-        v, x = _s_wise_max_foc!(colloc_cdp, colloc_cdp.interp.S[1], res.C, ws.fec,
-                                ws.dfecs, NaN)
+        v, x = _s_wise_max_foc!(colloc_cdp.cdp, colloc_cdp.interp.S[1],
+                                res.C, ws.fec, ws.dfecs, NaN)
         @test x ≈ 1.0 atol=1e-6
     end
 
@@ -100,7 +101,7 @@ using QuantEcon: qnwlogn
         basis = Basis(LinParams(50, s_min, s_max))
         res = solve(cdp, CollocationSolver(basis), verbose=0)  # solves fine via Brent
         @test res.converged
-        ws = CDPWorkspace(res.cdp)  # inner_solver defaults to :foc
+        ws = CDPWorkspace(ContinuousDPs._colloc(res))  # inner_solver defaults to :foc
         @test ws.dfecs === nothing  # Lin basis: FOC unavailable
     end
 
@@ -108,7 +109,7 @@ using QuantEcon: qnwlogn
         basis = Basis(ChebParams(10, s_min, s_max))
         @test_throws ArgumentError CollocationSolver(basis;
                                                      inner_solver=:newton)
-        colloc_cdp = ContinuousDPs._with_interp(cdp, ContinuousDPs.Interp(basis))
+        colloc_cdp = ContinuousDPs._CollocationProblem(cdp, ContinuousDPs.Interp(basis))
         @test_throws ArgumentError CDPWorkspace(colloc_cdp, inner_solver=:bogus)
     end
 end
