@@ -143,6 +143,17 @@ simulate(res, s_init, ts_length)
 
 See the demo notebooks for further examples.
 
+## POMDPs.jl interface
+
+With [POMDPs.jl](https://github.com/JuliaPOMDP/POMDPs.jl) and POMDPTools
+loaded, a package extension makes `CollocationSolver` available as a solver
+for POMDPs.jl models: `POMDPs.solve(CollocationSolver(basis), m)` solves any
+explicit-finite MDP — continuous states covered by the basis, finitely many
+actions, and explicit transition distributions — by the collocation method
+and returns a standard `POMDPs.Policy`. See the
+[documentation](https://QuantEcon.github.io/ContinuousDPs.jl) for usage,
+requirements, and a belief-MDP example.
+
 ## Demo Notebooks
 
 * [Stochastic Optimal Growth Model](https://nbviewer.org/github/QuantEcon/ContinuousDPs.jl/blob/main/examples/cdp_ex_optgrowth_jl.ipynb)
