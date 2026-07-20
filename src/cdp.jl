@@ -536,8 +536,9 @@ end
 """
     CDPWorkspace{TF,TD}
 
-Preallocated buffers used by the solution algorithms for a `ContinuousDP`.
-Construct with `CDPWorkspace(cdp; inner_solver=:foc)`.
+Preallocated buffers used by the solution algorithms for a dynamic program
+bound to an interpolation scheme. Construct with
+`CDPWorkspace(cp; inner_solver=:foc)`.
 
 Not thread-safe: use one workspace per thread.
 
@@ -866,7 +867,7 @@ function _s_wise_max_foc!(cdp::ContinuousDP, s, C, fec::FunEvalCache, dfecs,
 end
 
 """
-    _s_wise_max_foc_sweep!(cdp, C, Tv, X, fec, dfecs)
+    _s_wise_max_foc_sweep!(cp, C, Tv, X, fec, dfecs)
 
 Run the FOC-based inner maximization over all interpolation nodes, storing
 values in `Tv` and maximizers in `X`. The previous contents of `X` serve as
@@ -1111,7 +1112,7 @@ function _s_wise_max_multi_sweep!(cp::_CollocationProblem,
 end
 
 """
-    s_wise_max!(cdp, ss, C, Tv[, fec])
+    s_wise_max!(cp, ss, C, Tv[, fec])
 
 Find optimal value for each grid point. These helpers apply to
 one-dimensional continuous action spaces; discrete and multi-dimensional
@@ -1119,7 +1120,8 @@ action spaces are handled internally by the operators.
 
 # Arguments
 
-- `cdp::ContinuousDP`: The dynamic program.
+- `cp::_CollocationProblem`: The dynamic program bound to its interpolation
+  scheme.
 - `ss::AbstractArray{Float64}`: Interpolation nodes.
 - `C::Vector{Float64}`: Basis coefficient vector for the value function.
 - `Tv::Vector{Float64}`: A buffer array to hold the updated value function.
@@ -1146,13 +1148,14 @@ s_wise_max!(cp::_CollocationProblem, ss::AbstractArray{Float64},
     s_wise_max!(cp, ss, C, Tv, FunEvalCache(cp.interp.basis))
 
 """
-    s_wise_max!(cdp, ss, C, Tv, X[, fec])
+    s_wise_max!(cp, ss, C, Tv, X[, fec])
 
 Find optimal value and action for each grid point.
 
 # Arguments
 
-- `cdp::ContinuousDP`: The dynamic program.
+- `cp::_CollocationProblem`: The dynamic program bound to its interpolation
+  scheme.
 - `ss::AbstractArray{Float64}`: Interpolation nodes.
 - `C::Vector{Float64}`: Basis coefficient vector for the value function.
 - `Tv::Vector{Float64}`: A buffer array to hold the updated value function.
@@ -1181,13 +1184,14 @@ s_wise_max!(cp::_CollocationProblem, ss::AbstractArray{Float64},
     s_wise_max!(cp, ss, C, Tv, X, FunEvalCache(cp.interp.basis))
 
 """
-    s_wise_max(cdp, ss, C[, fec])
+    s_wise_max(cp, ss, C[, fec])
 
 Find optimal value and action for each grid point.
 
 # Arguments
 
-- `cdp::ContinuousDP`: The dynamic program.
+- `cp::_CollocationProblem`: The dynamic program bound to its interpolation
+  scheme.
 - `ss::AbstractArray{Float64}`: Interpolation nodes.
 - `C::Vector{Float64}`: Basis coefficient vector for the value function.
 - `fec::FunEvalCache`: Workspace for point evaluation of the value function.
@@ -1211,15 +1215,16 @@ s_wise_max(cp::_CollocationProblem, ss::AbstractArray{Float64},
 
 
 """
-    bellman_operator!(cdp, C, Tv)
-    bellman_operator!(cdp, C, ws)
+    bellman_operator!(cp, C, Tv)
+    bellman_operator!(cp, C, ws)
 
 Apply the Bellman operator and update the basis coefficients. Values are
 stored in `Tv` (or `ws.Tv`).
 
 # Arguments
 
-- `cdp::ContinuousDP`: The dynamic program.
+- `cp::_CollocationProblem`: The dynamic program bound to its interpolation
+  scheme.
 - `C::Vector{Float64}`: Basis coefficient vector for the value function.
 - `Tv::Vector{Float64}`: Vector to store values.
 - `ws::CDPWorkspace`: Workspace for the solution algorithms.
@@ -1265,14 +1270,15 @@ end
 
 
 """
-    compute_greedy!(cdp, C, X)
-    compute_greedy!(cdp, ss, C, X[, fec])
+    compute_greedy!(cp, C, X)
+    compute_greedy!(cp, ss, C, X[, fec])
 
 Compute the greedy policy for the given basis coefficients.
 
 # Arguments
 
-- `cdp::ContinuousDP`: The dynamic program.
+- `cp::_CollocationProblem`: The dynamic program bound to its interpolation
+  scheme.
 - `ss::AbstractArray{Float64}`: Interpolation nodes.
 - `C::Vector{Float64}`: Basis coefficient vector for the value function.
 - `X::Vector{Float64}`: A buffer array to hold the updated policy function.
@@ -1303,7 +1309,7 @@ compute_greedy!(cp::_CollocationProblem, C::Vector{Float64},
     compute_greedy!(cp, cp.interp.S, C, X)
 
 """
-    evaluate_policy!(cdp, X, C[, fec])
+    evaluate_policy!(cp, X, C[, fec])
 
 Compute the value function for a given policy and update the basis
 coefficients: solve `(Phi - beta * E[Phi(g(S, X, e))]) C = f(S, X)`, where
@@ -1314,7 +1320,8 @@ factorized in sparse form.
 
 # Arguments
 
-- `cdp::ContinuousDP`: The dynamic program.
+- `cp::_CollocationProblem`: The dynamic program bound to its interpolation
+  scheme.
 - `X::AbstractVecOrMat`: Policy function (action values); an `n x M`
   matrix for `M`-dimensional continuous actions.
 - `C::Vector{Float64}`: A buffer array to hold the basis coefficients.
@@ -1448,14 +1455,15 @@ end
 
 
 """
-    policy_iteration_operator!(cdp, C, X)
-    policy_iteration_operator!(cdp, C, ws)
+    policy_iteration_operator!(cp, C, X)
+    policy_iteration_operator!(cp, C, ws)
 
 Perform one step of policy function iteration and update the basis coefficients.
 
 # Arguments
 
-- `cdp::ContinuousDP`: The dynamic program.
+- `cp::_CollocationProblem`: The dynamic program bound to its interpolation
+  scheme.
 - `C::Vector{Float64}`: Basis coefficient vector for the value function.
 - `X::Vector{Float64}`: A buffer array to hold the updated policy function.
 - `ws::CDPWorkspace`: Workspace for the solution algorithms.
