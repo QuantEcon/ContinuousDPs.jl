@@ -1,20 +1,53 @@
 """
-    _QuadratureKernel{TG,TR,TW}
+    _TransitionKernel
 
-Internal representation of the transition kernel of a `ContinuousDP`: the
+Abstract supertype of internal transition-kernel representations: the
 distribution of the next state given `(s, x)`, as finitely many weighted
-branches `(s'_j, w_j)`. This structured kernel pairs the transition
-function `g` with fixed quadrature nodes and a weights carrier; branch `j`
-has next state `g(s, x, shocks[j])` and weight `w[j]`, where `w` is the
-weight container at `(s, x)`: the fixed vector itself, or the value of a
-user-supplied callable `weights(s)` / `weights(s, x)` (wrapped in
-`_StateWeights` / `_StateActionWeights` by `_build_kernel`).
+branches `(s'_k, w_k)`.
 
-Consumers iterate branches by index: fetch the weight container once per
-`(s, x)` with `_branch_weights` and evaluate next states with
-`_branch_state`; derivative-based consumers re-evaluate `_branch_state`
-at perturbed actions holding the branch index fixed. The plain expected
-value of an interpolant is provided by `_expected_value`.
+The general contract, sufficient for every derivative-free consumer (the
+Brent objectives via `_expected_value`, discrete-action enumeration, the
+policy-evaluation system assembly, and simulation), is:
+
+- `_branch_sum(f, ker, s, x, args...)`: return the sum of
+  `f(s', w, args...)` over the branches at `(s, x)`;
+- `_foreach_branch(f, ker, s, x, args...)`: call `f(s', w, args...)` on
+  each branch at `(s, x)` (for side-effecting consumers such as row
+  assembly);
+
+`f` is a top-level function and `args` its payload: passing the payload
+explicitly rather than capturing it in a closure is what keeps these
+traversals allocation-free (captured-variable closures materialize on
+the heap here).
+- `_draw_branch_index(rng, ker, s, x)`: draw a branch index from the
+  branch distribution (used by `simulate!`);
+- `_forces_brent(ker)`: whether the first-order-condition inner solver
+  must fall back to Brent. Defaults to `true`: the FOC paths additionally
+  require the indexed access described under [`_QuadratureKernel`](@ref),
+  which a general kernel need not provide.
+"""
+abstract type _TransitionKernel end
+
+_forces_brent(::_TransitionKernel) = true
+
+"""
+    _QuadratureKernel{TG,TR,TW} <: _TransitionKernel
+
+The structured transition kernel of a `ContinuousDP`: the transition
+function `g` paired with fixed quadrature nodes and a weights carrier.
+Branch `j` has next state `g(s, x, shocks[j])` and weight `w[j]`, where
+`w` is the weight container at `(s, x)`: the fixed vector itself, or the
+value of a user-supplied callable `weights(s)` / `weights(s, x)` (wrapped
+in `_StateWeights` / `_StateActionWeights` by `_build_kernel`).
+
+Besides the general `_TransitionKernel` contract, this kernel provides
+indexed access — `_branch_weights(ker, s, x)` (the weight container,
+fetched once per `(s, x)`) and `_branch_state(ker, s, x, j)` — on which
+the FOC solvers rely: derivative-based consumers re-evaluate
+`_branch_state` at perturbed actions holding the branch index fixed.
+Hence `_forces_brent` is `false` for fixed or state-only weights, `true`
+for action-dependent weights (whose derivative term the FOC solvers do
+not compute).
 
 Allocation contract: a callable weights function returning a `Tuple` or a
 statically-sized vector (e.g. a `StaticArrays.SVector`) keeps the sweeps
@@ -25,7 +58,7 @@ times per state per sweep, not once per state — so it should be cheap;
 anything expensive belongs in a table or interpolant precomputed outside
 the callable.
 """
-struct _QuadratureKernel{TG,TR<:AbstractVecOrMat,TW}
+struct _QuadratureKernel{TG,TR<:AbstractVecOrMat,TW} <: _TransitionKernel
     g::TG
     shocks::TR
     weights::TW
@@ -75,8 +108,35 @@ _branch_weights(ker::_QuadratureKernel, s, x) =
 _branch_state(ker::_QuadratureKernel, s, x, j::Int) =
     ker.g(s, x, _row(ker.shocks, j))
 
+# General-contract traversal, implemented by indexed access
+@inline function _branch_sum(f::F, ker::_QuadratureKernel, s, x,
+                             args::Vararg{Any,N}) where {F,N}
+    w = _branch_weights(ker, s, x)
+    acc = 0.0
+    for j in eachindex(w)
+        acc += f(_branch_state(ker, s, x, j), w[j], args...)
+    end
+    return acc
+end
+
+@inline function _foreach_branch(f::F, ker::_QuadratureKernel, s, x,
+                                 args::Vararg{Any,N}) where {F,N}
+    w = _branch_weights(ker, s, x)
+    for j in eachindex(w)
+        f(_branch_state(ker, s, x, j), w[j], args...)
+    end
+    return nothing
+end
+
 # E[V^(s')] under the kernel at (s, x), where V^ is the interpolant with
-# coefficients C evaluated through fec
+# coefficients C evaluated through fec. The general default goes through
+# the traversal contract (allocation-lean: the traversal indirection is
+# not free); the structured kernel overrides it with the direct indexed
+# loop, which is measurably allocation-free.
+_weighted_value(sp, w, fec, C) = w * funeval_point!(fec, C, sp)
+_expected_value(ker::_TransitionKernel, fec::FunEvalCache, C, s, x) =
+    _branch_sum(_weighted_value, ker, s, x, fec, C)
+
 function _expected_value(ker::_QuadratureKernel, fec::FunEvalCache, C, s, x)
     w = _branch_weights(ker, s, x)
     cont = 0.0
