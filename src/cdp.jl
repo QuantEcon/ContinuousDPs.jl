@@ -129,9 +129,12 @@ with the *indices* into `vals`, and the solution exposes both the values
 `MarkovChain`/`state_values` convention of QuantEcon.
 
 Infeasible state-action pairs are expressed by the reward function returning
-`-Inf`. The transition function `g` must nevertheless remain evaluable at
-every such pair: at a state where *every* action is infeasible, the solvers
-store the first action as a fallback, and policy evaluation calls `g` there.
+`-Inf`; the enumeration over actions then skips the transition evaluation
+for that candidate. A well-posed model should have at least one feasible
+action at every state the solver evaluates. If every action is infeasible
+at some state, the first action is retained as a fallback, and subsequent
+policy evaluation may call `g` for that pair — `g` should tolerate such
+calls.
 
 # Fields
 
@@ -187,7 +190,8 @@ and [`LQASolver`](@ref)).
 - `g::Tg`: State transition function `g(s, x, e)`.
 - `discount::Float64`: Discount factor.
 - `shocks::TR<:AbstractVecOrMat`: Discretized shock nodes.
-- `weights::Vector{Float64}`: Probability weights for the shock nodes.
+- `weights::Vector{Float64}`: Probability weights, one per shock node
+  (`length(weights) == size(shocks, 1)`).
 - `actions::TA<:ActionSpace`: Action space (see [`ContinuousActions`](@ref)
   and [`DiscreteActions`](@ref)).
 """
@@ -201,11 +205,15 @@ struct ContinuousDP{Tf,Tg,TR<:AbstractVecOrMat,TA<:ActionSpace}
 
     # The explicit inner constructor suppresses the implicit outer one,
     # which would otherwise be more specific than (and shadow) the
-    # validating positional constructor below whenever `discount` is
-    # already a Float64
+    # `discount::Real` positional constructor below whenever `discount`
+    # is already a Float64. The weights-length invariant lives here, the
+    # boundary every construction path must pass.
     function ContinuousDP{Tf,Tg,TR,TA}(
             f, g, discount, shocks, weights, actions
         ) where {Tf,Tg,TR<:AbstractVecOrMat,TA<:ActionSpace}
+        length(weights) == size(shocks, 1) || throw(ArgumentError(
+            "`weights` must have one weight per shock node " *
+            "($(size(shocks, 1))); got $(length(weights))"))
         return new{Tf,Tg,TR,TA}(f, g, discount, shocks, weights, actions)
     end
 end
@@ -231,14 +239,12 @@ Give either `actions`, or both `x_lb` and `x_ub` (equivalent to
   (lower and upper bound of the action as functions of the state) for a
   one-dimensional continuous action space.
 - `shocks::AbstractVecOrMat`: Discretized shock nodes.
-- `weights::Vector{Float64}`: Probability weights for the shock nodes.
+- `weights::Vector{Float64}`: Probability weights, one per shock node
+  (`length(weights) == size(shocks, 1)`).
 """
 function ContinuousDP(f, g, discount::Real,
                       shocks::AbstractVecOrMat, weights::Vector{Float64},
                       actions::ActionSpace)
-    length(weights) == size(shocks, 1) || throw(ArgumentError(
-        "`weights` must have one weight per shock node " *
-        "($(size(shocks, 1))); got $(length(weights))"))
     return ContinuousDP{typeof(f),typeof(g),typeof(shocks),typeof(actions)}(
         f, g, Float64(discount), shocks, weights, actions)
 end
