@@ -3,7 +3,7 @@ using ContinuousDPs: CollocationSolver
 using BasisMatrices: Basis, ChebParams, SplineParams
 using QuantEcon: qnwlogn
 import POMDPs
-using POMDPTools: SparseCat, Deterministic, stepthrough
+using POMDPTools: SparseCat, Deterministic, stepthrough, RolloutSimulator
 using QuickPOMDPs: QuickMDP
 using Random: Xoshiro
 
@@ -53,6 +53,14 @@ POMDPs.isterminal(::RestrictedMDP, s) = false
             @test POMDPs.action(policy, s) == res_native([s])[2][1]
             @test POMDPs.value(policy, s) ≈ res_native([s])[1][1] rtol=1e-9
         end
+        # Full node sweep: the policy is the exact greedy recomputation,
+        # and the fitted value differs from V by the residual, which is
+        # at solver tolerance at the collocation nodes
+        nodes = res_native.eval_nodes
+        @test [POMDPs.action(policy, s) for s in nodes] == res_native.X
+        @test [POMDPs.value(policy, s) for s in nodes] ≈
+              res_native.V - res_native.resid
+        @test [POMDPs.value(policy, s) for s in nodes] ≈ res_native.V atol=1e-6
     end
 
     @testset "adapter: expected-form reward r(s, x, sp)" begin
@@ -75,6 +83,25 @@ POMDPs.isterminal(::RestrictedMDP, s) = false
         steps = collect(stepthrough(m, policy, 1.0, "s,a,r", max_steps=10))
         @test length(steps) == 10
         @test all(st -> s_min <= st.s <= s_max, steps)
+    end
+
+    @testset "adapter: rollout consistency" begin
+        # Cross-validation through the ecosystem: the mean discounted
+        # return of seeded rollouts matches the fitted value within
+        # Monte Carlo error
+        m = m_quick((s, x) -> fd(s, x))
+        policy = POMDPs.solve(CollocationSolver(basis), m; verbose=0)
+        s0 = 1.0
+        rng = Xoshiro(42)
+        n_episodes = 200
+        returns = [POMDPs.simulate(
+                       RolloutSimulator(rng=rng, max_steps=500),
+                       m, policy, s0)
+                   for _ in 1:n_episodes]
+        mc_mean = sum(returns) / n_episodes
+        mc_se = sqrt(sum(abs2, returns .- mc_mean) / (n_episodes - 1)) /
+                sqrt(n_episodes)
+        @test abs(mc_mean - POMDPs.value(policy, s0)) < 5 * mc_se + 0.05
     end
 
     @testset "adapter: requirement checks" begin
