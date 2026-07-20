@@ -26,15 +26,16 @@ end
 function _policy_system_lu(Phi::AbstractMatrix, cp::_CollocationProblem,
                            X, fec)
     cdp, ss = cp.cdp, cp.interp.S
+    ker = _kernel(cdp)
     n = size(ss, 1)
     A = copyto!(Matrix{Float64}(undef, n, n), Phi)
     for i in 1:n
         s = _row(ss, i)
-        for j in eachindex(cdp.weights)
-            e = _row(cdp.shocks, j)
-            s_next = cdp.g(s, _row(X, i), e)
-            _sub_basis_row!(A, i, fec, s_next,
-                            cdp.discount * cdp.weights[j])
+        x = _row(X, i)
+        w = _branch_weights(ker, s, x)
+        for j in eachindex(w)
+            s_next = _branch_state(ker, s, x, j)
+            _sub_basis_row!(A, i, fec, s_next, cdp.discount * w[j])
         end
     end
     return lu!(A)
@@ -69,14 +70,16 @@ end
 function _policy_system_lu(Phi::SparseMatrixCSC, cp::_CollocationProblem,
                            X, fec)
     cdp, ss = cp.cdp, cp.interp.S
+    ker = _kernel(cdp)
     n = size(ss, 1)
     Is, Js, Vs = Int[], Int[], Float64[]
     for i in 1:n
         s = _row(ss, i)
-        for j in eachindex(cdp.weights)
-            e = _row(cdp.shocks, j)
-            s_next = cdp.g(s, _row(X, i), e)
-            _append_basis_row!(Is, Js, Vs, i, fec, s_next, cdp.weights[j])
+        x = _row(X, i)
+        w = _branch_weights(ker, s, x)
+        for j in eachindex(w)
+            s_next = _branch_state(ker, s, x, j)
+            _append_basis_row!(Is, Js, Vs, i, fec, s_next, w[j])
         end
     end
     E = sparse(Is, Js, Vs, n, n)  # sums duplicate entries
