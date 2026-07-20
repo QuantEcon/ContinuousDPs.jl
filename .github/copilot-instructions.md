@@ -125,6 +125,11 @@ ALWAYS run these validation steps after making changes:
 - `simulate` recomputes the greedy action exactly at each visited state for discrete actions (a discrete policy must not be interpolated); continuous actions keep policy interpolation.
 - LQA requires a continuous action space (`ArgumentError` otherwise).
 
+### Transition kernel (`src/transition_kernel.jl`)
+- The internal `_QuadratureKernel` (constructed per call via `_kernel(cdp)`, a free non-escaping bundle of `g`, `shocks`, `weights`) represents the transition kernel as finitely many weighted next-state branches per `(s, x)`. Every expectation loop routes through its primitives: `_branch_weights(ker, s, x)` (weight container, fetched once per `(s, x)`), `_branch_state(ker, s, x, j)` (next state on branch `j`; derivative-based consumers re-evaluate it at perturbed actions holding `j` fixed), and `_expected_value` (plain weighted sum of interpolant values). Do not write raw `for j in eachindex(cdp.weights)` expectation loops in new code.
+- Exceptions by design: `simulate!` samples shocks directly (sampling, not expectation) and LQA uses the fields directly.
+- The structured path must stay zero-allocation; the routing was validated bit-identical and allocation-byte-identical against the pre-kernel code.
+
 ### Solver workspace and inner solvers (`src/cdp.jl`, `src/inner_solvers.jl`, `src/policy_system.jl`)
 - `CDPWorkspace(cp::_CollocationProblem; inner_solver=:foc)` holds all preallocated buffers and evaluation caches; it is created once per `solve`. Workspaces and caches are NOT thread-safe (one per thread).
 - The inner maximization over actions uses the first-order condition by default (`inner_solver=:foc`): for scalar actions, safeguarded root-finding on H'; for M-dimensional actions, box-constrained LBFGS with the analytic gradient (exact interpolant gradients, finite differences of user `f`/`g`, evaluation points clamped into the box). Automatic fallback to the derivative-free path per basis (piecewise linear bases), per state (non-finite values, exceptions), and per call (`inner_solver=:brent`): Brent for scalar actions, cyclic coordinate-wise Brent for M-dimensional ones. Warm starts live in `ws.X`.
