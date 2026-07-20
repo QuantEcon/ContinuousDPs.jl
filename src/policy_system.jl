@@ -21,6 +21,40 @@
     return nvals, base
 end
 
+# Per-state row assembly, dispatched on the kernel tier: the structured
+# kernel keeps the direct indexed loops (allocation-free); general
+# kernels go through the traversal contract with top-level payload
+# functions (allocation-lean)
+@inline function _sub_state_rows!(A, i, fec, ker::_QuadratureKernel, s, x,
+                                  discount)
+    w = _branch_weights(ker, s, x)
+    for j in eachindex(w)
+        s_next = _branch_state(ker, s, x, j)
+        _sub_basis_row!(A, i, fec, s_next, discount * w[j])
+    end
+    return nothing
+end
+
+_sub_row_payload(sp, w, A, i, fec, discount) =
+    _sub_basis_row!(A, i, fec, sp, discount * w)
+_sub_state_rows!(A, i, fec, ker::_TransitionKernel, s, x, discount) =
+    _foreach_branch(_sub_row_payload, ker, s, x, A, i, fec, discount)
+
+@inline function _append_state_rows!(Is, Js, Vs, i, fec,
+                                     ker::_QuadratureKernel, s, x)
+    w = _branch_weights(ker, s, x)
+    for j in eachindex(w)
+        s_next = _branch_state(ker, s, x, j)
+        _append_basis_row!(Is, Js, Vs, i, fec, s_next, w[j])
+    end
+    return nothing
+end
+
+_append_row_payload(sp, w, Is, Js, Vs, i, fec) =
+    _append_basis_row!(Is, Js, Vs, i, fec, sp, w)
+_append_state_rows!(Is, Js, Vs, i, fec, ker::_TransitionKernel, s, x) =
+    _foreach_branch(_append_row_payload, ker, s, x, Is, Js, Vs, i, fec)
+
 # Dense path: A = Phi - beta * E[Phi(g(S, X, e))] assembled in place,
 # factorized with an in-place dense LU
 function _policy_system_lu(Phi::AbstractMatrix, cp::_CollocationProblem,
@@ -30,13 +64,8 @@ function _policy_system_lu(Phi::AbstractMatrix, cp::_CollocationProblem,
     n = size(ss, 1)
     A = copyto!(Matrix{Float64}(undef, n, n), Phi)
     for i in 1:n
-        s = _row(ss, i)
-        x = _row(X, i)
-        w = _branch_weights(ker, s, x)
-        for j in eachindex(w)
-            s_next = _branch_state(ker, s, x, j)
-            _sub_basis_row!(A, i, fec, s_next, cdp.discount * w[j])
-        end
+        _sub_state_rows!(A, i, fec, ker, _row(ss, i), _row(X, i),
+                         cdp.discount)
     end
     return lu!(A)
 end
@@ -74,13 +103,8 @@ function _policy_system_lu(Phi::SparseMatrixCSC, cp::_CollocationProblem,
     n = size(ss, 1)
     Is, Js, Vs = Int[], Int[], Float64[]
     for i in 1:n
-        s = _row(ss, i)
-        x = _row(X, i)
-        w = _branch_weights(ker, s, x)
-        for j in eachindex(w)
-            s_next = _branch_state(ker, s, x, j)
-            _append_basis_row!(Is, Js, Vs, i, fec, s_next, w[j])
-        end
+        _append_state_rows!(Is, Js, Vs, i, fec, ker, _row(ss, i),
+                            _row(X, i))
     end
     E = sparse(Is, Js, Vs, n, n)  # sums duplicate entries
     return lu(Phi - cdp.discount * E)

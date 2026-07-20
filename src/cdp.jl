@@ -1514,9 +1514,8 @@ function simulate!(rng::AbstractRNG, s_path::VecOrMat,
         for t in 1:ts_length - 1
             s = s_path[(s_ind_front..., t)...]
             x = policy(s)
-            j = _draw_branch_index(rng, ker, s, x)
-            e = res.cdp.shocks[(j, e_ind_tail...)...]
-            view(s_path, (s_ind_front..., t + 1)... ) .= res.cdp.g(s, x, e)
+            view(s_path, (s_ind_front..., t + 1)... ) .=
+                _draw_next_state(rng, ker, s, x)
         end
     end
 

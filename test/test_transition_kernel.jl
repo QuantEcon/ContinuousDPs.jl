@@ -47,6 +47,10 @@ function ContinuousDPs._branch_sum(f, ker::ListTestKernel, s, x,
     return acc
 end
 
+ContinuousDPs._draw_next_state(rng::ContinuousDPs.AbstractRNG,
+                               ker::ListTestKernel, s, x) =
+    ContinuousDPs._draw_next_state(rng, ker.quad, s, x)
+
 function ContinuousDPs._foreach_branch(f, ker::ListTestKernel, s, x,
                                        args...)
     q = ker.quad
@@ -298,6 +302,41 @@ end
             @test v_g ≈ v_q rtol=1e-12
             @test k_g == k_q
         end
+    end
+
+    @testset "kernel-carrying problem solves through the general tier" begin
+        # A ContinuousDP may carry a ready-made kernel in its weights
+        # slot (the injection point used by the generic-model adapter);
+        # solving then uses only the general contract: Brent is forced,
+        # the policy system assembles through the traversal, simulate
+        # draws through _draw_next_state
+        res_q = solve(cdp_fixed, CollocationSolver(basis); verbose=0)
+        gen = ListTestKernel(_build_kernel(_colloc(res_q)))
+        cdp_k = ContinuousDP(f=f, g=nothing, discount=beta,
+                             shocks=Float64[], weights=gen,
+                             x_lb=x_lb, x_ub=x_ub)
+        res_fb = solve(cdp_fixed,
+                       CollocationSolver(basis; inner_solver=:brent);
+                       verbose=0)
+        for alg in (PFI, VFI)
+            solver = CollocationSolver(basis; algorithm=alg,
+                                       inner_solver=:brent, max_iter=500)
+            res_k = solve(cdp_k, solver; verbose=0)
+            @test res_k.converged
+            res_ref = alg === PFI ? res_fb :
+                solve(cdp_fixed, CollocationSolver(basis; algorithm=VFI,
+                                                   inner_solver=:brent,
+                                                   max_iter=500);
+                      verbose=0)
+            @test res_k.C ≈ res_ref.C rtol=1e-6
+            @test res_k.X ≈ res_ref.X rtol=1e-4
+        end
+        # FOC request silently degrades to Brent (general kernels force it)
+        res_foc = solve(cdp_k, CollocationSolver(basis); verbose=0)
+        @test res_foc.C ≈ res_fb.C rtol=1e-6
+        # simulate draws through the kernel contract
+        path = simulate(ContinuousDPs.Random.Xoshiro(7), res_foc, 1.0, 20)
+        @test all(s -> s_min <= s <= s_max, path)
     end
 
     @testset "validation errors" begin

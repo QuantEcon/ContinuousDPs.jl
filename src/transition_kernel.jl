@@ -181,6 +181,14 @@ solvers.
 _build_kernel(cdp::ContinuousDP, s_probe, x_probe) =
     _build_kernel_w(cdp.weights, cdp, s_probe, x_probe)
 
+# A problem may carry a ready-made kernel in its weights slot (the
+# internal representation used e.g. by the POMDPs generic-model
+# adapter); construction is then a passthrough and nothing is probed.
+# The constructor's weights processing likewise passes it through.
+_build_kernel_w(ker::_TransitionKernel, cdp::ContinuousDP,
+                s_probe, x_probe) = ker
+_process_weights(ker::_TransitionKernel, shocks) = ker
+
 _build_kernel_w(w::AbstractVector, cdp::ContinuousDP, s_probe, x_probe) =
     _QuadratureKernel(cdp.g, cdp.shocks, w)
 
@@ -255,7 +263,9 @@ _probe_action(a::ContinuousActions{M}, s) where {M} =
 
 function _build_kernel(cp::_CollocationProblem)
     cdp = cp.cdp
-    # Fixed weights probe nothing: no user function is evaluated here
+    # Ready-made kernels and fixed weights probe nothing: no user
+    # function is evaluated here
+    cdp.weights isa _TransitionKernel && return cdp.weights
     cdp.weights isa AbstractVector &&
         return _QuadratureKernel(cdp.g, cdp.shocks, cdp.weights)
     s_probe = _row(cp.interp.S, 1)
@@ -283,6 +293,20 @@ function _check_sampling_weights(w)
         "(missing mass acts as extra discounting) but have no defined " *
         "sampling semantics"))
     return total
+end
+
+"""
+    _draw_next_state(rng, ker, s, x)
+
+Draw a next state from the branch distribution at `(s, x)`. Part of the
+general `_TransitionKernel` contract for kernels used with `simulate!`;
+the structured kernel draws a branch index by inverse CDF and evaluates
+its next state. There is no generic fallback: a general kernel that
+should support simulation defines its own method.
+"""
+function _draw_next_state(rng::AbstractRNG, ker::_QuadratureKernel, s, x)
+    j = _draw_branch_index(rng, ker, s, x)
+    return _branch_state(ker, s, x, j)
 end
 
 # Draw a branch index from the branch distribution at (s, x) by inverse
