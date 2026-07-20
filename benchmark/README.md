@@ -8,16 +8,21 @@ which can be run standalone or through
 
 ## What is benchmarked
 
-The suite runs three model cases:
+The suite runs the following model cases:
 
 - `1d_cheb`: 1-D stochastic optimal growth, Chebyshev basis (50 nodes,
   9 shock nodes);
 - `1d_spline`: same model, cubic spline basis (101 nodes);
 - `2d_spline`: 2-D stochastic optimal growth with leisure
   (Santos, 1999, Sec. 7.3; same model as in `test/test_cdp_multidim.jl`),
-  quadratic spline basis (43 × 3 nodes, 7 shock nodes).
+  quadratic spline basis (43 × 3 nodes, 7 shock nodes);
+- `1d_cheb_discrete`: discrete-action variant of the 1-D model
+  (201 actions, solved by enumeration; `solve` and `bellman_operator`
+  keys only);
+- `2d_spline_2ctrl`: the Santos model in its original two-control
+  formulation (`solve` and `bellman_operator` keys only).
 
-For each case, the following are benchmarked:
+For the first three cases, the following are benchmarked:
 
 | Key | Description |
 |:----|:------------|

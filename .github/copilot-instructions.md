@@ -46,15 +46,14 @@ weights = [1.0]  # shock weights
 x_lb(s) = 0.01  # lower bound on action
 x_ub(s) = s - 0.01  # upper bound on action
 
-# Create basis for approximation
+# Create continuous DP from the model primitives (no basis here)
+cdp = ContinuousDP(f, g, discount, shocks, weights, x_lb, x_ub)
+
+# The solution methodology is specified by a solver object
 n = 10
 basis = Basis(ChebParams(n, s_min, s_max))
-
-# Create continuous DP
-cdp = ContinuousDP(f, g, discount, shocks, weights, x_lb, x_ub, basis)
-
-# Solve using PFI or VFI
-res = solve(cdp, PFI)  # or VFI
+solver = CollocationSolver(basis; algorithm=PFI)  # or algorithm=VFI
+res = solve(cdp, solver)
 
 # Simulate solution
 s_init = 1.0
@@ -122,7 +121,7 @@ ALWAYS run these validation steps after making changes:
 
 ### Action spaces (`src/cdp.jl`)
 - `ContinuousDP` stores an `actions::ActionSpace`: `ContinuousActions(x_lb, x_ub)` (one-dimensional box; the legacy positional `x_lb, x_ub` constructor arguments wrap into this), `ContinuousActions{M}(x_lb, x_ub)` (M-dimensional box with length-M tuple- or vector-valued bounds; actions passed to `f`/`g` as length-M indexable collections; policies stored as `n x M` matrices), or `DiscreteActions(vals)` (finite set of action values of any homogeneous type).
-- Discrete actions follow the QuantEcon `MarkovChain`/`state_values` convention: solvers work with indices internally (`ws.X_ind`, `res.X_ind`); `res.X` exposes the corresponding values. The inner problem is solved by exact enumeration; `inner_solver` is ignored. Infeasible state-action pairs are expressed by `f` returning `-Inf`.
+- Discrete actions follow the QuantEcon `MarkovChain`/`state_values` convention: solvers work with indices internally (`ws.X_ind`, `res.X_ind`); `res.X` exposes the corresponding values. The inner problem is solved by exact enumeration; `inner_solver` is ignored. Infeasible state-action pairs are expressed by `f` returning `-Inf`; the enumeration then skips `g` for that candidate. A well-posed model has at least one feasible action at every state the solver evaluates; if every action is infeasible at a node, the first action is retained as a fallback and later policy evaluation may call `g` for that pair (so `g` should tolerate it).
 - `simulate` recomputes the greedy action exactly at each visited state for discrete actions (a discrete policy must not be interpolated); continuous actions keep policy interpolation.
 - LQA requires a continuous action space (`ArgumentError` otherwise).
 
@@ -145,8 +144,8 @@ Candidate actions explored during the inner maximization can map the next state 
 ### Algorithm Types
 - **PFI (Policy Function Iteration)**: Generally faster convergence; per-iteration cost includes a collocation linear solve
 - **VFI (Value Function Iteration)**: More robust but potentially slower
-- **LQA (Linear Quadratic Approximation)**: Approximates the model around a steady state
-- All algorithms available through `solve()` with method parameter; `solve` also accepts `inner_solver=:foc` (default) or `:brent` for the inner maximization
+- **LQA (Linear Quadratic Approximation)**: Approximates the model around a reference point
+- PFI and VFI are selected with `CollocationSolver(basis; algorithm=PFI)` / `CollocationSolver(basis; algorithm=VFI)`; the inner maximizer with its `inner_solver` keyword (`:foc` default, `:brent` derivative-free); LQA with `LQASolver(basis; point=point)`. The solver object is passed to `solve(cdp, solver)`.
 
 ### Basis Types
 - **Chebyshev**: `ChebParams(n, s_min, s_max)` - good general purpose choice
