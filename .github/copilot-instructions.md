@@ -98,6 +98,7 @@ ALWAYS run these validation steps after making changes:
 ├── examples/
 │   ├── cdp_ex_optgrowth_jl.ipynb    # Optimal growth model example
 │   ├── cdp_ex_MF_jl.ipynb           # Miranda & Fackler examples
+│   ├── cdp_ex_odu.jl                # Search with learning (belief MDP, callable weights)
 │   └── lqapprox_jl.ipynb            # LQ approximation examples
 └── Project.toml             # Package dependencies and metadata
 ```
