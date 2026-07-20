@@ -54,6 +54,7 @@ approx_lq
 Modules = [ContinuousDPs]
 Pages   = [
     "cdp.jl",
+    "transition_kernel.jl",
     "inner_solvers.jl",
     "policy_system.jl",
     "lq_approx.jl",

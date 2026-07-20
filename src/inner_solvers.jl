@@ -25,13 +25,9 @@ function _s_wise_max!(cdp::ContinuousDP, s, C, fec::FunEvalCache)
     cdp.actions isa ContinuousActions || throw(ArgumentError(
         "Brent maximization requires a continuous action space; discrete " *
         "action spaces are solved by enumeration"))
+    ker = _kernel(cdp)
     function objective(x)
-        cont = 0.0
-        for j in eachindex(cdp.weights)
-            e = _row(cdp.shocks, j)
-            s_next = cdp.g(s, x, e)
-            cont += cdp.weights[j] * funeval_point!(fec, C, s_next)
-        end
+        cont = _expected_value(ker, fec, C, s, x)
         flow = cdp.f(s, x)
         return flow + cdp.discount * cont
     end
@@ -49,11 +45,7 @@ end
 function _objective(cdp::ContinuousDP, s, C, fec::FunEvalCache, x)
     flow = cdp.f(s, x)
     isfinite(flow) || return flow
-    cont = 0.0
-    for j in eachindex(cdp.weights)
-        e = _row(cdp.shocks, j)
-        cont += cdp.weights[j] * funeval_point!(fec, C, cdp.g(s, x, e))
-    end
+    cont = _expected_value(_kernel(cdp), fec, C, s, x)
     return flow + cdp.discount * cont
 end
 
@@ -124,18 +116,18 @@ function _objective_and_deriv(cdp::ContinuousDP, s, C, fec::FunEvalCache,
     h > eps() * max(abs(x), 1.0) || return NaN, NaN
     f0 = cdp.f(s, x)
     fp = (cdp.f(s, x + h) - cdp.f(s, x - h)) / (2h)
+    ker = _kernel(cdp)
+    w = _branch_weights(ker, s, x)
     cont = 0.0
     contp = 0.0
-    for j in eachindex(cdp.weights)
-        e = _row(cdp.shocks, j)
-        s_next = cdp.g(s, x, e)
-        s_up = cdp.g(s, x + h, e)
-        s_dn = cdp.g(s, x - h, e)
+    for j in eachindex(w)
+        s_next = _branch_state(ker, s, x, j)
+        s_up = _branch_state(ker, s, x + h, j)
+        s_dn = _branch_state(ker, s, x - h, j)
         v = funeval_point!(fec, C, s_next)
         dv = _grad_dot_gx(dfecs, s_next, s_up, s_dn, h)
-        w = cdp.weights[j]
-        cont += w * v
-        contp += w * dv
+        cont += w[j] * v
+        contp += w[j] * dv
     end
     H = f0 + cdp.discount * cont
     Hp = fp + cdp.discount * contp
@@ -302,12 +294,10 @@ function _negH_multi!(G, cdp::ContinuousDP, s, C, fec::FunEvalCache{N},
         return -flow  # +Inf (or NaN): Optim sees an infeasible point
     end
 
+    ker = _kernel(cdp)
+
     if G === nothing
-        cont = 0.0
-        for j in eachindex(cdp.weights)
-            e = _row(cdp.shocks, j)
-            cont += cdp.weights[j] * funeval_point!(fec, C, cdp.g(s, xt, e))
-        end
+        cont = _expected_value(ker, fec, C, s, xt)
         return -(flow + cdp.discount * cont)
     end
 
@@ -330,25 +320,26 @@ function _negH_multi!(G, cdp::ContinuousDP, s, C, fec::FunEvalCache{N},
         G[d] = (fu - fl) / (2 * h[d])
     end
 
+    w = _branch_weights(ker, s, xt)
     cont = 0.0
-    for j in eachindex(cdp.weights)
-        e = _row(cdp.shocks, j)
-        w = cdp.weights[j]
-        s_next = cdp.g(s, xt, e)
-        cont += w * funeval_point!(fec, C, s_next)
-        # grad V^(s_next), evaluated once per shock
+    for j in eachindex(w)
+        s_next = _branch_state(ker, s, xt, j)
+        cont += w[j] * funeval_point!(fec, C, s_next)
+        # grad V^(s_next), evaluated once per branch
         gradv = ntuple(nd -> funeval_point!(dfecs[nd], s_next), Val(N))
         for d in 1:M
-            s_up = cdp.g(s, ntuple(k -> k == d ? xt[k] + h[d] : xt[k],
-                                   Val(M)), e)
-            s_dn = cdp.g(s, ntuple(k -> k == d ? xt[k] - h[d] : xt[k],
-                                   Val(M)), e)
+            s_up = _branch_state(ker, s,
+                                 ntuple(k -> k == d ? xt[k] + h[d] : xt[k],
+                                        Val(M)), j)
+            s_dn = _branch_state(ker, s,
+                                 ntuple(k -> k == d ? xt[k] - h[d] : xt[k],
+                                        Val(M)), j)
             dv = 0.0
             for nd in 1:N
                 dv += gradv[nd] *
                       ((_coord(s_up, nd) - _coord(s_dn, nd)) / (2 * h[d]))
             end
-            G[d] += cdp.discount * w * dv
+            G[d] += cdp.discount * w[j] * dv
         end
     end
 
