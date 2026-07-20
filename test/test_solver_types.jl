@@ -71,7 +71,8 @@ using QuantEcon: qnwlogn
             cdp; weights=[0.5, 0.5])
         acts = ContinuousActions(x_lb, x_ub)
         @test_throws r"one weight per shock node" ContinuousDP{
-            typeof(f),typeof(g),typeof(shocks),typeof(acts)}(
+            typeof(f),typeof(g),typeof(shocks),Vector{Float64},
+            typeof(acts)}(
             f, g, beta, shocks, [0.5, 0.5], acts)
     end
 

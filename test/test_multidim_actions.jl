@@ -159,7 +159,10 @@ using ContinuousDPs: CDPWorkspace
         fec = ContinuousDPs.FunEvalCache(basis)
         for i in (1, 40, 100)
             xout = fill(NaN, 2)
-            ContinuousDPs._s_wise_max_multi!(colloc_cdp2.cdp, S[i, :],
+            ContinuousDPs._s_wise_max_multi!(colloc_cdp2.cdp,
+                                             ContinuousDPs._build_kernel(
+                                                 colloc_cdp2),
+                                             S[i, :],
                                              res_b.C, fec, nothing, xout,
                                              false)
             @test xout == res_b.X[i, :]

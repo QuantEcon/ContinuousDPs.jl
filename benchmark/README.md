@@ -20,7 +20,12 @@ The suite runs the following model cases:
   (201 actions, solved by enumeration; `solve` and `bellman_operator`
   keys only);
 - `2d_spline_2ctrl`: the Santos model in its original two-control
-  formulation (`solve` and `bellman_operator` keys only).
+  formulation (`solve` and `bellman_operator` keys only);
+- `1d_cheb_w_s` / `1d_cheb_w_sx`: the 1-D model with its fixed weights
+  served by a Tuple-returning callable `weights(s)` / `weights(s, x)`
+  (state-only keeps the FOC path, action-dependent forces Brent;
+  `solve_PFI` and `bellman_operator` keys only). Compare against
+  `1d_cheb` to isolate the callable-weights overhead.
 
 For the first three cases, the following are benchmarked:
 

@@ -19,7 +19,8 @@ Covers the main computational kernels and end-to-end solves:
 using BenchmarkTools
 using ContinuousDPs
 using ContinuousDPs:
-    _s_wise_max!, bellman_operator!, compute_greedy!, evaluate_policy!,
+    _s_wise_max!, _build_kernel, bellman_operator!, compute_greedy!,
+    evaluate_policy!,
     FunEvalCache, CDPWorkspace, DiscreteActions, Interp, _CollocationProblem
 using BasisMatrices: Basis, ChebParams, SplineParams
 using QuantEcon: qnwlogn, qnwnorm
@@ -140,8 +141,10 @@ for (label, cdp, basis) in cases
     # Per-state optimization kernel (#73)
     s_mid = N == 1 ? colloc_cdp.interp.S[div(n, 2)] : colloc_cdp.interp.S[div(n, 2), :]
     fec = FunEvalCache(colloc_cdp.interp.basis)
+    ker = _build_kernel(colloc_cdp)
     grp["s_wise_max_one_state"] =
-        @benchmarkable _s_wise_max!($(colloc_cdp.cdp), $s_mid, $C0, $fec)
+        @benchmarkable _s_wise_max!($(colloc_cdp.cdp), $ker, $s_mid, $C0,
+                                    $fec)
 
     # State loops over the kernel, using a preallocated workspace
     ws = CDPWorkspace(colloc_cdp)
@@ -233,6 +236,34 @@ let
     grp["bellman_operator"] = @benchmarkable bellman_operator!(
         $colloc_cdp, C, $ws
     ) setup = (C = copy($C0)) evals = 1
+end
+
+#= Callable shock weights =#
+
+# The 1-D growth model with the same fixed quadrature weights served by a
+# Tuple-returning callable (the allocation-free static contract): "w_s"
+# keeps the FOC path (state-only weights), "w_sx" forces the Brent
+# fallback (action-dependent weights). Comparing these keys against
+# `1d_cheb` isolates the cost of the callable-weights machinery.
+let
+    cdp_fixed = growth_model_1d(s_min_1d, s_max_1d)
+    basis = Basis(ChebParams(50, s_min_1d, s_max_1d))
+    w_tuple = Tuple(cdp_fixed.weights)
+    w_s = s -> w_tuple
+    w_sx = (s, x) -> w_tuple
+    for (label, wf) in [("1d_cheb_w_s", w_s), ("1d_cheb_w_sx", w_sx)]
+        cdp = ContinuousDP(cdp_fixed; weights=wf)
+        grp = SUITE[label] = BenchmarkGroup()
+        solver_pfi = CollocationSolver(basis)
+        grp["solve_PFI"] = @benchmarkable solve($cdp, $solver_pfi; verbose=0)
+        res = solve(cdp, solver_pfi; verbose=0)
+        colloc_cdp = _CollocationProblem(cdp, Interp(basis))
+        C0 = copy(res.C)
+        ws = CDPWorkspace(colloc_cdp)
+        grp["bellman_operator"] = @benchmarkable bellman_operator!(
+            $colloc_cdp, C, $ws
+        ) setup = (C = copy($C0)) evals = 1
+    end
 end
 
 #= Standalone execution =#

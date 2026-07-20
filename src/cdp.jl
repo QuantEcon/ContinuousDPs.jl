@@ -190,31 +190,38 @@ and [`LQASolver`](@ref)).
 - `g::Tg`: State transition function `g(s, x, e)`.
 - `discount::Float64`: Discount factor.
 - `shocks::TR<:AbstractVecOrMat`: Discretized shock nodes.
-- `weights::Vector{Float64}`: Probability weights, one per shock node
-  (`length(weights) == size(shocks, 1)`).
+- `weights::TW`: Probability weights for the shock nodes: a
+  `Vector{Float64}` with one weight per shock node
+  (`length(weights) == size(shocks, 1)`) for a fixed distribution, or a
+  callable `weights(s)` / `weights(s, x)` for a state- or
+  state-action-dependent distribution (see the constructor).
 - `actions::TA<:ActionSpace`: Action space (see [`ContinuousActions`](@ref)
   and [`DiscreteActions`](@ref)).
 """
-struct ContinuousDP{Tf,Tg,TR<:AbstractVecOrMat,TA<:ActionSpace}
+struct ContinuousDP{Tf,Tg,TR<:AbstractVecOrMat,TW,TA<:ActionSpace}
     f::Tf
     g::Tg
     discount::Float64
     shocks::TR
-    weights::Vector{Float64}
+    weights::TW
     actions::TA
 
     # The explicit inner constructor suppresses the implicit outer one,
     # which would otherwise be more specific than (and shadow) the
     # `discount::Real` positional constructor below whenever `discount`
-    # is already a Float64. The weights-length invariant lives here, the
-    # boundary every construction path must pass.
-    function ContinuousDP{Tf,Tg,TR,TA}(
+    # is already a Float64 (which runs `_process_weights`). The
+    # fixed-weights length invariant lives here, the boundary every
+    # construction path must pass; callable weights are validated at
+    # kernel construction instead (see `_build_kernel`).
+    function ContinuousDP{Tf,Tg,TR,TW,TA}(
             f, g, discount, shocks, weights, actions
-        ) where {Tf,Tg,TR<:AbstractVecOrMat,TA<:ActionSpace}
-        length(weights) == size(shocks, 1) || throw(ArgumentError(
-            "`weights` must have one weight per shock node " *
-            "($(size(shocks, 1))); got $(length(weights))"))
-        return new{Tf,Tg,TR,TA}(f, g, discount, shocks, weights, actions)
+        ) where {Tf,Tg,TR<:AbstractVecOrMat,TW,TA<:ActionSpace}
+        if weights isa AbstractVector
+            length(weights) == size(shocks, 1) || throw(ArgumentError(
+                "`weights` must have one weight per shock node " *
+                "($(size(shocks, 1))); got $(length(weights))"))
+        end
+        return new{Tf,Tg,TR,TW,TA}(f, g, discount, shocks, weights, actions)
     end
 end
 
@@ -239,18 +246,45 @@ Give either `actions`, or both `x_lb` and `x_ub` (equivalent to
   (lower and upper bound of the action as functions of the state) for a
   one-dimensional continuous action space.
 - `shocks::AbstractVecOrMat`: Discretized shock nodes.
-- `weights::Vector{Float64}`: Probability weights, one per shock node
-  (`length(weights) == size(shocks, 1)`).
+- `weights`: Probability weights for the shock nodes. Either a fixed
+  probability vector with one weight per shock node
+  (`length(weights) == size(shocks, 1)`), or a callable returning such a
+  collection: `weights(s)` for a state-dependent distribution, or
+  `weights(s, x)` for a state-action-dependent one (if both arities
+  apply, the state-action form is used). A callable returning a `Tuple`
+  or a statically-sized vector (e.g. a `StaticArrays.SVector`) keeps the
+  solver sweeps allocation-free; returning a freshly allocated `Vector`
+  is supported but allocation-lean. Callable weights are validated only
+  by a length check at a probe point; weights are not checked to sum to
+  one (sub-stochastic weights are permitted and act as additional
+  discounting). With action-dependent weights the first-order-condition
+  inner solver does not apply and `solve` automatically falls back to
+  Brent (see [`solve`](@ref)).
 """
 function ContinuousDP(f, g, discount::Real,
-                      shocks::AbstractVecOrMat, weights::Vector{Float64},
+                      shocks::AbstractVecOrMat, weights,
                       actions::ActionSpace)
-    return ContinuousDP{typeof(f),typeof(g),typeof(shocks),typeof(actions)}(
-        f, g, Float64(discount), shocks, weights, actions)
+    w = _process_weights(weights, shocks)
+    return ContinuousDP{typeof(f),typeof(g),typeof(shocks),typeof(w),
+                        typeof(actions)}(
+        f, g, Float64(discount), shocks, w, actions)
+end
+
+# Vector weights convert to the canonical Vector{Float64} (the length
+# invariant is enforced by the inner constructor); anything else must at
+# least be callable, with full validation at kernel construction
+_process_weights(weights::AbstractVector, shocks) =
+    convert(Vector{Float64}, weights)
+
+function _process_weights(weights, shocks)
+    isempty(methods(weights)) && throw(ArgumentError(
+        "`weights` must be a probability vector or a callable " *
+        "`weights(s)` / `weights(s, x)`"))
+    return weights
 end
 
 ContinuousDP(f, g, discount::Real,
-             shocks::AbstractVecOrMat, weights::Vector{Float64},
+             shocks::AbstractVecOrMat, weights,
              x_lb, x_ub) =
     ContinuousDP(f, g, discount, shocks, weights,
                  ContinuousActions(x_lb, x_ub))
@@ -277,14 +311,14 @@ end
 # `(..., actions, basis)` form would silently match the primitives
 # `(..., x_lb, x_ub)` method and construct a nonsense action space.
 ContinuousDP(f, g, discount::Real,
-             shocks::AbstractVecOrMat, weights::Vector{Float64},
+             shocks::AbstractVecOrMat, weights,
              actions_or_x_lb, basis::Basis) =
     throw(ArgumentError(
         "the basis-endowed `ContinuousDP` constructors have been removed: " *
         "construct the problem without `basis` and pass " *
         "`CollocationSolver(basis)` to `solve`"))
 ContinuousDP(f, g, discount::Real,
-             shocks::AbstractVecOrMat, weights::Vector{Float64},
+             shocks::AbstractVecOrMat, weights,
              x_lb, x_ub, basis::Basis) =
     throw(ArgumentError(
         "the basis-endowed `ContinuousDP` constructors have been removed: " *
@@ -435,6 +469,7 @@ reallocated otherwise.
 function evaluate!(res::CDPSolveResult, fec::FunEvalCache)
     cdp, C, s_nodes = res.cdp, res.C, res.eval_nodes
     a = cdp.actions
+    ker = _build_kernel(_colloc(res))
     n = size(s_nodes, 1)
     length(res.V) == n || (res.V = Vector{Float64}(undef, n))
     _policy_size_ok(a, res.X, n) || (res.X = _policy_buffer(a, n))
@@ -443,17 +478,18 @@ function evaluate!(res::CDPSolveResult, fec::FunEvalCache)
         length(res.X_ind) == n || (res.X_ind = Vector{Int}(undef, n))
         for i in 1:n
             res.V[i], res.X_ind[i] =
-                _s_wise_max_discrete!(cdp, _row(s_nodes, i), C, fec)
+                _s_wise_max_discrete!(cdp, ker, _row(s_nodes, i), C, fec)
             res.X[i] = a.vals[res.X_ind[i]]
         end
     elseif a isa ContinuousActions && _action_dim(a) > 1
         # Respect the inner solver used by `solve`: a :brent solve must not
         # have its policy re-evaluated through the derivative-based path
-        dfecs = res.inner_solver == :foc ? _eval_dfecs(res.interp) : nothing
+        dfecs = res.inner_solver == :foc && !_forces_brent(ker) ?
+            _eval_dfecs(res.interp) : nothing
         dfecs === nothing || foreach(dfec -> set_coefs!(dfec, C), dfecs)
         for i in 1:n
-            res.V[i] = _s_wise_max_multi!(cdp, _row(s_nodes, i), C, fec,
-                                          dfecs, view(res.X, i, :),
+            res.V[i] = _s_wise_max_multi!(cdp, ker, _row(s_nodes, i), C,
+                                          fec, dfecs, view(res.X, i, :),
                                           dfecs !== nothing)
         end
     else
@@ -524,22 +560,25 @@ policy, and `resid` is the Bellman residual at `s_nodes`.
 function (res::CDPSolveResult)(s_nodes::AbstractArray{Float64})
     cdp, C = res.cdp, res.C
     a = cdp.actions
+    ker = _build_kernel(_colloc(res))
     fec = FunEvalCache(res.interp.basis)
     n = size(s_nodes, 1)
     if a isa DiscreteActions
         V = Vector{Float64}(undef, n)
         X = Vector{_policy_eltype(a)}(undef, n)
         for i in 1:n
-            V[i], k = _s_wise_max_discrete!(cdp, _row(s_nodes, i), C, fec)
+            V[i], k = _s_wise_max_discrete!(cdp, ker, _row(s_nodes, i), C,
+                                            fec)
             X[i] = a.vals[k]
         end
     elseif a isa ContinuousActions && _action_dim(a) > 1
         V = Vector{Float64}(undef, n)
         X = _policy_buffer(a, n)
-        dfecs = res.inner_solver == :foc ? _eval_dfecs(res.interp) : nothing
+        dfecs = res.inner_solver == :foc && !_forces_brent(ker) ?
+            _eval_dfecs(res.interp) : nothing
         dfecs === nothing || foreach(dfec -> set_coefs!(dfec, C), dfecs)
         for i in 1:n
-            V[i] = _s_wise_max_multi!(cdp, _row(s_nodes, i), C, fec,
+            V[i] = _s_wise_max_multi!(cdp, ker, _row(s_nodes, i), C, fec,
                                       dfecs, view(X, i, :),
                                       dfecs !== nothing)
         end
@@ -568,8 +607,9 @@ Not thread-safe: use one workspace per thread.
 - `fec::TF<:FunEvalCache`: Workspace for point evaluation of the value
   function.
 - `dfecs::TD`: Tuple of `DerivFunEvalCache`s for the gradient of the value
-  function (one per state dimension), or `nothing` if the basis does not
-  support the first-order-condition solver (see below).
+  function (one per state dimension), or `nothing` if the
+  first-order-condition solver does not apply (basis not continuously
+  differentiable, or action-dependent shock weights; see below).
 - `Tv::Vector{Float64}`: Buffer for updated values at the interpolation
   nodes.
 - `X::TX<:VecOrMat{Float64}`: Buffer for updated actions at the
@@ -615,7 +655,8 @@ function CDPWorkspace(cp::_CollocationProblem{N};
     n = interp.length
     discrete = cdp.actions isa DiscreteActions
     dfecs = if !discrete && inner_solver == :foc &&
-               all(d -> _foc_suitable(basis.params[d]), 1:N)
+               all(d -> _foc_suitable(basis.params[d]), 1:N) &&
+               !_forces_brent(_build_kernel(cp))
         ntuple(d -> DerivFunEvalCache(
                    basis, ntuple(i -> Int(i == d), Val(N))), Val(N))
     else
@@ -664,9 +705,10 @@ function s_wise_max!(cp::_CollocationProblem, ss::AbstractArray{Float64},
                      C::Vector{Float64}, Tv::Vector{Float64},
                      fec::FunEvalCache)
     cdp = cp.cdp
+    ker = _build_kernel(cp)
     n = size(ss, 1)
     for i in 1:n
-        Tv[i], _ = _s_wise_max!(cdp, _row(ss, i), C, fec)
+        Tv[i], _ = _s_wise_max!(cdp, ker, _row(ss, i), C, fec)
     end
     return Tv
 end
@@ -700,9 +742,10 @@ function s_wise_max!(cp::_CollocationProblem, ss::AbstractArray{Float64},
                      C::Vector{Float64}, Tv::Vector{Float64},
                      X::Vector{Float64}, fec::FunEvalCache)
     cdp = cp.cdp
+    ker = _build_kernel(cp)
     n = size(ss, 1)
     for i in 1:n
-        Tv[i], X[i] = _s_wise_max!(cdp, _row(ss, i), C, fec)
+        Tv[i], X[i] = _s_wise_max!(cdp, ker, _row(ss, i), C, fec)
     end
     return Tv, X
 end
@@ -821,9 +864,10 @@ function compute_greedy!(cp::_CollocationProblem, ss::AbstractArray{Float64},
                          C::Vector{Float64}, X::Vector{Float64},
                          fec::FunEvalCache)
     cdp = cp.cdp
+    ker = _build_kernel(cp)
     n = size(ss, 1)
     for i in 1:n
-        _, X[i] = _s_wise_max!(cdp, _row(ss, i), C, fec)
+        _, X[i] = _s_wise_max!(cdp, ker, _row(ss, i), C, fec)
     end
     return X
 end
@@ -1032,7 +1076,10 @@ itself (a [`ContinuousDP`](@ref)) holds only the model primitives.
   does not attempt to detect nonconcavity or multiple stationary points.
   Use `inner_solver=:brent` for the derivative-free path. The choice has
   no effect for discrete action spaces (solved by exact enumeration), but
-  the value is still validated.
+  the value is still validated. With action-dependent shock weights
+  `weights(s, x)` (see [`ContinuousDP`](@ref)) the first-order condition
+  acquires a term the FOC solver does not compute, so `:foc` automatically
+  behaves as `:brent`.
 - `tol::Real`: Convergence tolerance.
 - `max_iter::Integer`: Maximum number of iterations.
 """
@@ -1331,16 +1378,17 @@ discrete ones). Not thread-safe: use one instance per thread.
 abstract type PolicyFunction end
 
 # Discrete actions: exact greedy recomputation at the evaluation point
-struct _GreedyPolicyFunction{TCDP<:ContinuousDP,TF<:FunEvalCache,
+struct _GreedyPolicyFunction{TCDP<:ContinuousDP,TK,TF<:FunEvalCache,
                              TV<:AbstractVector} <: PolicyFunction
     cdp::TCDP
+    ker::TK
     C::Vector{Float64}
     fec::TF
     vals::TV
 end
 
 (pf::_GreedyPolicyFunction)(s) =
-    pf.vals[_s_wise_max_discrete!(pf.cdp, s, pf.C, pf.fec)[2]]
+    pf.vals[_s_wise_max_discrete!(pf.cdp, pf.ker, s, pf.C, pf.fec)[2]]
 
 # Continuous actions: piecewise-linear interpolation of the nodal policy
 # values, evaluated with the non-allocating point kernel. For a piecewise
@@ -1369,7 +1417,8 @@ end
 function PolicyFunction(res::CDPSolveResult{Algo,N}) where {Algo,N}
     a = res.cdp.actions
     if a isa DiscreteActions
-        return _GreedyPolicyFunction(res.cdp, res.C,
+        return _GreedyPolicyFunction(res.cdp, _build_kernel(_colloc(res)),
+                                     res.C,
                                      FunEvalCache(res.interp.basis),
                                      a.vals)
     end
@@ -1403,12 +1452,6 @@ function simulate!(rng::AbstractRNG, s_path::VecOrMat,
                    res::CDPSolveResult{Algo,N},
                    s_init) where {Algo,N}
     ts_length = size(s_path)[end]
-    cdf = cumsum(res.cdp.weights)
-    r = rand(rng, ts_length - 1)
-    e_ind = Array{Int}(undef, ts_length - 1)
-    for t in 1:ts_length - 1
-        e_ind[t] = searchsortedlast(cdf, r[t]) + 1
-    end
 
     # Policy lookup: exact greedy recomputation for a discrete action
     # space, piecewise-linear interpolation (with clamping into the action
@@ -1418,11 +1461,31 @@ function simulate!(rng::AbstractRNG, s_path::VecOrMat,
     s_ind_front = Base.front(axes(s_path))
     e_ind_tail = Base.tail(axes(res.cdp.shocks))
     view(s_path, (s_ind_front..., 1)... ) .= s_init
-    for t in 1:ts_length - 1
-        s = s_path[(s_ind_front..., t)...]
-        x = policy(s)
-        e = res.cdp.shocks[(e_ind[t], e_ind_tail...)...]
-        view(s_path, (s_ind_front..., t + 1)... ) .= res.cdp.g(s, x, e)
+
+    if res.cdp.weights isa AbstractVector
+        cdf = cumsum(res.cdp.weights)
+        r = rand(rng, ts_length - 1)
+        e_ind = Array{Int}(undef, ts_length - 1)
+        for t in 1:ts_length - 1
+            e_ind[t] = searchsortedlast(cdf, r[t]) + 1
+        end
+        for t in 1:ts_length - 1
+            s = s_path[(s_ind_front..., t)...]
+            x = policy(s)
+            e = res.cdp.shocks[(e_ind[t], e_ind_tail...)...]
+            view(s_path, (s_ind_front..., t + 1)... ) .= res.cdp.g(s, x, e)
+        end
+    else
+        # State- or state-action-dependent weights: the branch
+        # distribution depends on the visited path, so draw sequentially
+        ker = _build_kernel(_colloc(res))
+        for t in 1:ts_length - 1
+            s = s_path[(s_ind_front..., t)...]
+            x = policy(s)
+            j = _draw_branch_index(rng, ker, s, x)
+            e = res.cdp.shocks[(j, e_ind_tail...)...]
+            view(s_path, (s_ind_front..., t + 1)... ) .= res.cdp.g(s, x, e)
+        end
     end
 
     return s_path

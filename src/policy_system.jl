@@ -26,7 +26,7 @@ end
 function _policy_system_lu(Phi::AbstractMatrix, cp::_CollocationProblem,
                            X, fec)
     cdp, ss = cp.cdp, cp.interp.S
-    ker = _kernel(cdp)
+    ker = _build_kernel(cp)
     n = size(ss, 1)
     A = copyto!(Matrix{Float64}(undef, n, n), Phi)
     for i in 1:n
@@ -70,7 +70,7 @@ end
 function _policy_system_lu(Phi::SparseMatrixCSC, cp::_CollocationProblem,
                            X, fec)
     cdp, ss = cp.cdp, cp.interp.S
-    ker = _kernel(cdp)
+    ker = _build_kernel(cp)
     n = size(ss, 1)
     Is, Js, Vs = Int[], Int[], Float64[]
     for i in 1:n

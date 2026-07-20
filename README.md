@@ -33,8 +33,9 @@ where
     multi-dimensional and discrete actions are also supported --- see below),
 - $f(s, x)$ is the **reward** function,
 - $g(s, x, \varepsilon)$ is the **state transition** function,
-- $\varepsilon$ is a **random shock**,
-    (i.i.d. across periods, independent of the state and the action),
+- $\varepsilon$ is a **random shock**
+    (i.i.d. across periods; state- and action-dependent distributions are
+    also supported via a callable `weights` --- see the documentation),
 - $\beta \in (0, 1)$ is the **discount factor**, and
 - $x_{\mathrm{lb}}(s)$ and $x_{\mathrm{ub}}(s)$ are state-dependent
     **action bounds**.
@@ -60,7 +61,9 @@ where
   bounds functions, respectively,
 - `discount` is the discount factor, and
 - `shocks` and `weights` specify a discretization of the distribution of
-  $\varepsilon$ (a vector of nodes and their probability weights).
+  $\varepsilon$ (a vector of nodes and their probability weights; `weights`
+  may also be a callable `weights(s)` or `weights(s, x)` for a state- or
+  action-dependent distribution over the nodes).
 
 Instead of `x_lb` and `x_ub`, an action space object can be passed as
 `actions`:
