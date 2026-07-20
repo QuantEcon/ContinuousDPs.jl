@@ -1,9 +1,21 @@
 using ContinuousDPs: CollocationSolver, CDPWorkspace, FunEvalCache,
                      _colloc, _build_kernel, _forces_brent, _objective,
-                     _StateWeights, _StateActionWeights, bellman_operator!
+                     _StateWeights, _StateActionWeights, bellman_operator!,
+                     _check_sampling_weights
 using BasisMatrices: Basis, ChebParams, funeval
 using QuantEcon: qnwlogn
 using StaticArrays: SVector
+
+# An RNG replaying a scripted sequence of uniform draws, for testing the
+# exact branch-selection conventions of `simulate`
+mutable struct ScriptedRNG <: ContinuousDPs.Random.AbstractRNG
+    vals::Vector{Float64}
+    i::Int
+end
+ScriptedRNG(vals) = ScriptedRNG(collect(Float64, vals), 0)
+ContinuousDPs.Random.rand(rng::ScriptedRNG) = (rng.i += 1; rng.vals[rng.i])
+ContinuousDPs.Random.rand(rng::ScriptedRNG, n::Integer) =
+    [ContinuousDPs.Random.rand(rng) for _ in 1:n]
 
 @testset "Callable shock weights" begin
     alpha, beta = 0.4, 0.96
@@ -178,5 +190,124 @@ using StaticArrays: SVector
         # Fixed-weights length validation
         @test_throws r"one weight per shock node" ContinuousDP(
             cdp_fixed; weights=[0.5, 0.5])
+    end
+
+    @testset "sampling boundary validation" begin
+        # The Bellman operators accept sub-stochastic weights (missing
+        # mass = zero continuation value, i.e. extra discounting), but
+        # that has no path-wise interpretation: simulate rejects
+        # improper weights, for fixed and callable representations alike
+        w_sub = [0.4, 0.4]
+        cdp_sub = ContinuousDP(f=f, g=g, discount=beta, shocks=shocks2,
+                               weights=w_sub, x_lb=x_lb, x_ub=x_ub)
+        res_sub = solve(cdp_sub, CollocationSolver(basis); verbose=0)
+        @test res_sub.converged   # solving is allowed...
+        @test_throws r"summing to one" simulate(res_sub, 1.0, 10)
+
+        cdp_sub_c = ContinuousDP(cdp_sub; weights=s -> (0.4, 0.4))
+        res_sub_c = solve(cdp_sub_c, CollocationSolver(basis); verbose=0)
+        @test res_sub_c.C == res_sub.C   # same Bellman semantics
+        @test_throws r"summing to one" simulate(res_sub_c, 1.0, 10)
+
+        # The boundary check itself: negative, non-finite, and
+        # super-stochastic weights are all rejected; proper vectors and
+        # quadrature weights pass
+        @test_throws r"finite nonnegative" _check_sampling_weights(
+            [1.2, -0.2])
+        @test_throws r"finite nonnegative" _check_sampling_weights(
+            (0.5, NaN))
+        @test_throws r"finite nonnegative" _check_sampling_weights(
+            [0.5, Inf])
+        @test_throws r"summing to one" _check_sampling_weights((0.6, 0.6))
+        @test _check_sampling_weights([0.5, 0.5]) == 1.0
+        # quadrature weights carry roundoff; the returned total is what
+        # the samplers scale their draws by
+        @test _check_sampling_weights(Tuple(weights)) ≈ 1 atol=1e-8
+
+        # A proper degenerate distribution: the fixed and callable
+        # representations sample the same (here deterministic) process
+        cdp_pf = ContinuousDP(cdp_sub; weights=[0.0, 1.0])
+        cdp_pc = ContinuousDP(cdp_sub; weights=s -> (0.0, 1.0))
+        res_pf = solve(cdp_pf, CollocationSolver(basis); verbose=0)
+        res_pc = solve(cdp_pc, CollocationSolver(basis); verbose=0)
+        @test simulate(res_pf, 1.0, 20) == simulate(res_pc, 1.0, 20)
+
+        # Branch-selection conventions under scripted draws: the fixed
+        # (scaled searchsortedlast) and callable (r < acc) samplers agree
+        # at cumulative boundaries, on zero draws with a leading
+        # zero-probability branch, and for sums within the accepted
+        # tolerance (where draws sample the normalized distribution
+        # instead of misassigning the residual mass or indexing out of
+        # bounds)
+        for (wts, rvals) in [
+                ([0.5, 0.5], [0.5, 0.25, 0.75]),
+                ([0.0, 1.0], [0.0, 0.5, 1 - 1e-12]),
+                ([0.5, 0.5 - 1e-9], [1 - 1e-12, 0.5, 0.0]),
+            ]
+            cdp_wf = ContinuousDP(cdp_sub; weights=wts)
+            wt = Tuple(wts)
+            cdp_wc = ContinuousDP(cdp_sub; weights=s -> wt)
+            res_wf = solve(cdp_wf, CollocationSolver(basis); verbose=0)
+            res_wc = solve(cdp_wc, CollocationSolver(basis); verbose=0)
+            pf = simulate(ScriptedRNG(rvals), res_wf, 1.0, length(rvals) + 1)
+            pc = simulate(ScriptedRNG(rvals), res_wc, 1.0, length(rvals) + 1)
+            @test pf == pc
+        end
+        # The zero draw on [0.0, 1.0] must select branch 2, not the
+        # leading zero-probability branch
+        res_z = solve(ContinuousDP(cdp_sub; weights=[0.0, 1.0]),
+                      CollocationSolver(basis); verbose=0)
+        path_z = simulate(ScriptedRNG([0.0]), res_z, 1.0, 2)
+        pfun = ContinuousDPs.PolicyFunction(res_z)
+        @test path_z[2] == g(1.0, pfun(1.0), shocks2[2])
+    end
+
+    @testset "construction probe tolerates infeasible probe points" begin
+        # Discrete actions: a model may define weights only at feasible
+        # actions (f == -Inf short-circuits before any weight fetch); the
+        # first action being infeasible must not reject the problem at
+        # kernel construction
+        vals = [-1.0, 0.05, 0.5]
+        fd(s, x) = (x < 0 || x >= s) ? -Inf : log(x)
+        wd(s, x) = x < 0 ? error("weights undefined at an infeasible action") :
+                           (0.5, 0.5)
+        cdp_d = ContinuousDP(f=fd, g=g, discount=beta, shocks=shocks2,
+                             weights=wd, actions=DiscreteActions(vals))
+        res_d = solve(cdp_d, CollocationSolver(basis); verbose=0)
+        cdp_df = ContinuousDP(cdp_d; weights=[0.5, 0.5])
+        res_df = solve(cdp_df, CollocationSolver(basis); verbose=0)
+        @test res_d.C == res_df.C
+        @test res_d.X == res_df.X
+
+        # Continuous actions: weights undefined exactly at the lower
+        # bound (the probe point); the optimizer only evaluates the
+        # interior
+        wl(s, x) = x <= x_lb(s) ? error("weights undefined at the bound") :
+                                  (0.5, 0.5)
+        cdp_l = ContinuousDP(f=f, g=g, discount=beta, shocks=shocks2,
+                             weights=wl, x_lb=x_lb, x_ub=x_ub)
+        res_l = solve(cdp_l, CollocationSolver(basis); verbose=0)
+        cdp_lf = ContinuousDP(cdp_l; weights=[0.5, 0.5])
+        res_lf = solve(cdp_lf, CollocationSolver(basis; inner_solver=:brent);
+                       verbose=0)
+        @test res_l.C == res_lf.C
+        @test res_l.X == res_lf.X
+
+        # A tolerated probe failure must not disable validation: a
+        # wrong-length return at the first feasible action still errors
+        # via the per-fetch length check, rather than silently
+        # truncating the branch loop
+        w_bad(s, x) = x <= x_lb(s) ? error("undefined at the bound") :
+                                     (1.0,)   # one weight, two shocks
+        cdp_trunc = ContinuousDP(f=f, g=g, discount=beta, shocks=shocks2,
+                                 weights=w_bad, x_lb=x_lb, x_ub=x_ub)
+        @test_throws r"one weight per shock node" solve(
+            cdp_trunc, CollocationSolver(basis); verbose=0)
+
+        # An actual `nothing` return at the probe point is a malformed
+        # return, not a tolerated probe failure
+        cdp_nothing = ContinuousDP(cdp_trunc; weights=s -> nothing)
+        @test_throws r"indexable collection" solve(
+            cdp_nothing, CollocationSolver(basis); verbose=0)
     end
 end

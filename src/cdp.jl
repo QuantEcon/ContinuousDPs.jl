@@ -255,11 +255,16 @@ Give either `actions`, or both `x_lb` and `x_ub` (equivalent to
   or a statically-sized vector (e.g. a `StaticArrays.SVector`) keeps the
   solver sweeps allocation-free; returning a freshly allocated `Vector`
   is supported but allocation-lean. Callable weights are validated only
-  by a length check at a probe point; weights are not checked to sum to
-  one (sub-stochastic weights are permitted and act as additional
-  discounting). With action-dependent weights the first-order-condition
-  inner solver does not apply and `solve` automatically falls back to
-  Brent (see [`solve`](@ref)).
+  by a length check at a probe point (skipped if the probe call errors);
+  the solve operators do not check that weights sum to one
+  (sub-stochastic weights are permitted and act as additional
+  discounting). Simulation, by contrast, requires a proper probability
+  vector at every visited `(s, x)` — `simulate` throws an
+  `ArgumentError` for weights that are negative, non-finite, or do not
+  sum to one, since the missing mass has no path-wise interpretation.
+  With action-dependent weights the first-order-condition inner solver
+  does not apply and `solve` automatically falls back to Brent (see
+  [`solve`](@ref)).
 """
 function ContinuousDP(f, g, discount::Real,
                       shocks::AbstractVecOrMat, weights,
@@ -272,7 +277,8 @@ end
 
 # Vector weights convert to the canonical Vector{Float64} (the length
 # invariant is enforced by the inner constructor); anything else must at
-# least be callable, with full validation at kernel construction
+# least be callable, with full validation at solve entry (workspace
+# creation; see _validate_weights)
 _process_weights(weights::AbstractVector, shocks) =
     convert(Vector{Float64}, weights)
 
@@ -650,6 +656,7 @@ function CDPWorkspace(cp::_CollocationProblem{N};
                       inner_solver::Symbol=:foc) where N
     inner_solver in (:foc, :brent) ||
         throw(ArgumentError("inner_solver must be :foc or :brent"))
+    _validate_weights(cp)
     cdp, interp = cp.cdp, cp.interp
     basis = interp.basis
     n = interp.length
@@ -1463,11 +1470,24 @@ function simulate!(rng::AbstractRNG, s_path::VecOrMat,
     view(s_path, (s_ind_front..., 1)... ) .= s_init
 
     if res.cdp.weights isa AbstractVector
+        # Sampling needs a proper probability vector (the Bellman-side
+        # sub-stochastic allowance has no path-wise meaning): the fixed
+        # path validates once here; the callable path in the else branch
+        # validates per visited (s, x) inside _draw_branch_index.
+        # Draws are scaled by the validated total (sampling the
+        # normalized distribution within the accepted tolerance), and the
+        # index is clamped: r * total can round up to or above cdf[end],
+        # which would otherwise index one past the last shock. (The clamp
+        # also covers proper weights whose cumsum rounds slightly below
+        # one — a latent out-of-bounds edge predating the kernel work.)
+        total = _check_sampling_weights(res.cdp.weights)
         cdf = cumsum(res.cdp.weights)
+        n_shocks = length(cdf)
         r = rand(rng, ts_length - 1)
         e_ind = Array{Int}(undef, ts_length - 1)
         for t in 1:ts_length - 1
-            e_ind[t] = searchsortedlast(cdf, r[t]) + 1
+            e_ind[t] = min(searchsortedlast(cdf, r[t] * total) + 1,
+                           n_shocks)
         end
         for t in 1:ts_length - 1
             s = s_path[(s_ind_front..., t)...]

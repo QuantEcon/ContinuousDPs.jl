@@ -34,8 +34,9 @@ where
 - ``f(s, x)`` is the **reward** function,
 - ``g(s, x, \varepsilon)`` is the **state transition** function,
 - ``\varepsilon`` is a **random shock**
-    (i.i.d. across periods; state- and action-dependent distributions are
-    also supported --- see below),
+    (with fixed `weights`, i.i.d. across periods; callable `weights`
+    instead specify a conditional distribution at each current state or
+    state-action pair --- see below),
 - ``\beta \in (0, 1)`` is the **discount factor**, and
 - ``x_{\mathrm{lb}}(s)`` and ``x_{\mathrm{ub}}(s)`` are state-dependent
     **action bounds**.
@@ -96,10 +97,13 @@ Three patterns, in increasing order of generality:
 A callable `weights` returning a `Tuple` (or a statically-sized vector
 such as a `StaticArrays.SVector`) keeps the solver's inner loops
 allocation-free; returning a freshly allocated `Vector` also works at a
-small cost. The weights are not validated beyond a length check: weights
-that sum to less than one are permitted and act as additional discounting
-(e.g. exogenous exit risk). As always, keep `g(s, x, e)` within the
-approximation domain for every shock node with positive weight.
+small cost. The solver validates the weights only by a length check:
+weights that sum to less than one are permitted and act as additional
+discounting (e.g. exogenous exit risk). `simulate`, by contrast, requires
+a proper probability vector at every visited state-action pair — the
+missing mass has no path-wise interpretation — and rejects negative,
+non-finite, or non-unit-sum weights. As always, keep `g(s, x, e)` within
+the approximation domain for every shock node with positive weight.
 
 The solution methodology --- the interpolation basis and the algorithm
 parameters --- is specified separately by a solver object:

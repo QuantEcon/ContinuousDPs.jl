@@ -34,8 +34,9 @@ where
 - $f(s, x)$ is the **reward** function,
 - $g(s, x, \varepsilon)$ is the **state transition** function,
 - $\varepsilon$ is a **random shock**
-    (i.i.d. across periods; state- and action-dependent distributions are
-    also supported via a callable `weights` --- see the documentation),
+    (with fixed `weights`, i.i.d. across periods; callable `weights`
+    instead specify a conditional distribution at each current state or
+    state-action pair --- see the documentation),
 - $\beta \in (0, 1)$ is the **discount factor**, and
 - $x_{\mathrm{lb}}(s)$ and $x_{\mathrm{ub}}(s)$ are state-dependent
     **action bounds**.
