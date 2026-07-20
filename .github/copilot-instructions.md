@@ -74,9 +74,11 @@ ALWAYS run these validation steps after making changes:
 ### Key Directories and Files
 ```
 ├── src/
-│   ├── ContinuousDPs.jl     # Main module file
+│   ├── ContinuousDPs.jl     # Main module file (include order = narrative order)
 │   ├── point_eval.jl        # Non-allocating point-evaluation kernels
-│   ├── cdp.jl               # Core continuous DP functionality
+│   ├── cdp.jl               # Narrative core: types, operators, solve, simulate
+│   ├── inner_solvers.jl     # Per-state inner maximization paths and sweeps
+│   ├── policy_system.jl     # Policy-evaluation collocation system assembly
 │   └── lq_approx.jl         # Linear quadratic approximation methods
 ├── docs/
 │   ├── make.jl              # Documenter build script
@@ -102,7 +104,7 @@ ALWAYS run these validation steps after making changes:
 ```
 
 ### Important Files to Check When Making Changes
-- Always check `src/cdp.jl` when modifying core solving algorithms
+- Always check `src/cdp.jl` when modifying core solving algorithms; it is the narrative core (types, operators, solve, simulate) and must stay readable top-down — implementation detail belongs in `src/inner_solvers.jl` (per-state maximization) and `src/policy_system.jl` (system assembly), which are included after it and may reference its types (never the reverse)
 - Always check `src/point_eval.jl` when modifying interpolant evaluation; its behavior contract is exact agreement with `BasisMatrices.funeval`/`evalbase` (see below)
 - Always check `src/lq_approx.jl` when working with linear quadratic approximations
 - Always run tests in `test/test_point_eval.jl` when modifying `src/point_eval.jl`
@@ -124,8 +126,8 @@ ALWAYS run these validation steps after making changes:
 - `simulate` recomputes the greedy action exactly at each visited state for discrete actions (a discrete policy must not be interpolated); continuous actions keep policy interpolation.
 - LQA requires a continuous action space (`ArgumentError` otherwise).
 
-### Solver workspace and inner solvers (`src/cdp.jl`)
-- `CDPWorkspace(cdp; inner_solver=:foc)` holds all preallocated buffers and evaluation caches; it is created once per `solve`. Workspaces and caches are NOT thread-safe (one per thread).
+### Solver workspace and inner solvers (`src/cdp.jl`, `src/inner_solvers.jl`, `src/policy_system.jl`)
+- `CDPWorkspace(cp::_CollocationProblem; inner_solver=:foc)` holds all preallocated buffers and evaluation caches; it is created once per `solve`. Workspaces and caches are NOT thread-safe (one per thread).
 - The inner maximization over actions uses the first-order condition by default (`inner_solver=:foc`): for scalar actions, safeguarded root-finding on H'; for M-dimensional actions, box-constrained LBFGS with the analytic gradient (exact interpolant gradients, finite differences of user `f`/`g`, evaluation points clamped into the box). Automatic fallback to the derivative-free path per basis (piecewise linear bases), per state (non-finite values, exceptions), and per call (`inner_solver=:brent`): Brent for scalar actions, cyclic coordinate-wise Brent for M-dimensional ones. Warm starts live in `ws.X`.
 - The scalar-action and discrete-action sweeps over states are allocation-free except for `Optim.maximize`'s small result object on Brent paths; do not introduce per-state allocations there. The `M > 1` continuous-action path is allocation-lean rather than allocation-free (small per-state bounds and optimizer work arrays); do not add avoidable allocations. Benchmark allocation columns are watched.
 - `evaluate_policy!` assembles the collocation system with the point kernels, in sparse form when `Phi` is sparse (spline and piecewise linear bases). Preserve this dense/sparse dispatch.

@@ -12,6 +12,8 @@ const DPAlgorithm = DDPAlgorithm
 
 include("point_eval.jl")
 include("cdp.jl")
+include("inner_solvers.jl")
+include("policy_system.jl")
 include("lq_approx.jl")
 
 export
