@@ -212,7 +212,9 @@ struct ContinuousDP{Tf,Tg,TR<:AbstractVecOrMat,TW,TA<:ActionSpace}
     # is already a Float64 (which runs `_process_weights`). The
     # fixed-weights length invariant lives here, the boundary every
     # construction path must pass; callable weights are validated at
-    # kernel construction instead (see `_build_kernel`).
+    # solve entry instead — a one-time best-effort probe at workspace
+    # creation (see `_validate_weights`) plus a length check on every
+    # fetch (see the weight carriers in transition_kernel.jl).
     function ContinuousDP{Tf,Tg,TR,TW,TA}(
             f, g, discount, shocks, weights, actions
         ) where {Tf,Tg,TR<:AbstractVecOrMat,TW,TA<:ActionSpace}
@@ -254,9 +256,13 @@ Give either `actions`, or both `x_lb` and `x_ub` (equivalent to
   apply, the state-action form is used). A callable returning a `Tuple`
   or a statically-sized vector (e.g. a `StaticArrays.SVector`) keeps the
   solver sweeps allocation-free; returning a freshly allocated `Vector`
-  is supported but allocation-lean. Callable weights are validated only
-  by a length check at a probe point (skipped if the probe call errors);
-  the solve operators do not check that weights sum to one
+  is supported but allocation-lean. At solve initialization, callable
+  weights are probed once for an indexable, real-valued return with one
+  entry per shock node; because the probe state-action pair need not be
+  feasible, an exception from that probe is tolerated. Regardless of the
+  probe result, every callable-weight evaluation checks that its length
+  matches the shock support — this per-fetch check is the correctness
+  guarantee. The solve operators do not check that weights sum to one
   (sub-stochastic weights are permitted and act as additional
   discounting). Simulation, by contrast, requires a proper probability
   vector at every visited `(s, x)` — `simulate` throws an

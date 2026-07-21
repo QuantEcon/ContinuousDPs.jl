@@ -97,13 +97,18 @@ Three patterns, in increasing order of generality:
 A callable `weights` returning a `Tuple` (or a statically-sized vector
 such as a `StaticArrays.SVector`) keeps the solver's inner loops
 allocation-free; returning a freshly allocated `Vector` also works at a
-small cost. The solver validates the weights only by a length check:
-weights that sum to less than one are permitted and act as additional
-discounting (e.g. exogenous exit risk). `simulate`, by contrast, requires
-a proper probability vector at every visited state-action pair — the
-missing mass has no path-wise interpretation — and rejects negative,
-non-finite, or non-unit-sum weights. As always, keep `g(s, x, e)` within
-the approximation domain for every shock node with positive weight.
+small cost. Callable weights are probed once at solve initialization for
+an indexable, real-valued return with one entry per shock node (an
+exception from the probe is tolerated, since the probe state-action pair
+need not be feasible), and every evaluation during the solve checks that
+the returned length matches the shock support. The solver does not
+require the weights to sum to one: weights that sum to less than one are
+permitted and act as additional discounting (e.g. exogenous exit risk).
+`simulate`, by contrast, requires a proper probability vector at every
+visited state-action pair — the missing mass has no path-wise
+interpretation — and rejects negative, non-finite, or non-unit-sum
+weights. As always, keep `g(s, x, e)` within the approximation domain for
+every shock node with positive weight.
 
 The solution methodology --- the interpolation basis and the algorithm
 parameters --- is specified separately by a solver object:
