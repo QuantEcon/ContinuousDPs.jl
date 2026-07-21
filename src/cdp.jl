@@ -670,9 +670,14 @@ function CDPWorkspace(cp::_CollocationProblem{N};
     basis = interp.basis
     n = interp.length
     discrete = cdp.actions isa DiscreteActions
+    ker = _build_kernel(cp)
     dfecs = if !discrete && inner_solver == :foc &&
                all(d -> _foc_suitable(basis.params[d]), 1:N) &&
-               !_forces_brent(_build_kernel(cp))
+               !_forces_brent(ker)
+        # A kernel that opts into the FOC path must actually provide the
+        # indexed access the FOC solvers require: fail here with an
+        # informative error rather than with a MethodError mid-sweep
+        _check_foc_capability(ker, cp)
         ntuple(d -> DerivFunEvalCache(
                    basis, ntuple(i -> Int(i == d), Val(N))), Val(N))
     else
@@ -1306,6 +1311,13 @@ function _solve!(cp::_CollocationProblem,
     cdp, interp = cp.cdp, cp.interp
     cdp.actions isa ContinuousActions || throw(ArgumentError(
         "LQA requires a continuous action space"))
+    # LQA linearizes cdp.g around the approximation point; an injected
+    # ready-made kernel replaces g and the shock representation entirely
+    # (g may be absent or stale), so there is nothing valid to linearize
+    cdp.weights isa _TransitionKernel && throw(ArgumentError(
+        "LQA requires the structured (g, shocks, weights) primitives; " *
+        "a problem carrying a ready-made transition kernel is not " *
+        "supported"))
 
     # Unpack point
     s_star, x_star, e_star = point
@@ -1514,9 +1526,8 @@ function simulate!(rng::AbstractRNG, s_path::VecOrMat,
         for t in 1:ts_length - 1
             s = s_path[(s_ind_front..., t)...]
             x = policy(s)
-            j = _draw_branch_index(rng, ker, s, x)
-            e = res.cdp.shocks[(j, e_ind_tail...)...]
-            view(s_path, (s_ind_front..., t + 1)... ) .= res.cdp.g(s, x, e)
+            view(s_path, (s_ind_front..., t + 1)... ) .=
+                _draw_next_state(rng, ker, s, x)
         end
     end
 

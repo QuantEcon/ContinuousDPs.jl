@@ -2,7 +2,7 @@ using ContinuousDPs: CollocationSolver, CDPWorkspace, FunEvalCache,
                      _colloc, _build_kernel, _forces_brent, _objective,
                      _StateWeights, _StateActionWeights, bellman_operator!,
                      _check_sampling_weights, _TransitionKernel
-using BasisMatrices: Basis, ChebParams, funeval
+using BasisMatrices: Basis, ChebParams, SplineParams, funeval
 using QuantEcon: qnwlogn
 using StaticArrays: SVector
 
@@ -47,6 +47,10 @@ function ContinuousDPs._branch_sum(f, ker::ListTestKernel, s, x,
     return acc
 end
 
+ContinuousDPs._draw_next_state(rng::ContinuousDPs.Random.AbstractRNG,
+                               ker::ListTestKernel, s, x) =
+    ContinuousDPs._draw_next_state(rng, ker.quad, s, x)
+
 function ContinuousDPs._foreach_branch(f, ker::ListTestKernel, s, x,
                                        args...)
     q = ker.quad
@@ -55,6 +59,78 @@ function ContinuousDPs._foreach_branch(f, ker::ListTestKernel, s, x,
         f(ContinuousDPs._branch_state(q, s, x, j), w[j], args...)
     end
     return nothing
+end
+
+# A kernel with genuinely (s, x)-dependent support: one certain branch
+# below the threshold state, two branches with an action-dependent split
+# above it. Implements only the general contract, with an independently
+# written _draw_next_state; exercises what distinguishes the general
+# tier from callable weights over fixed shock nodes.
+struct TwoRegimeKernel <: ContinuousDPs._TransitionKernel
+    thresh::Float64
+    lo::Float64
+    hi::Float64
+end
+
+_tr_p(ker::TwoRegimeKernel, s, x) = 0.3 + 0.4 * clamp(x / ker.hi, 0.0, 1.0)
+_tr_low(ker::TwoRegimeKernel, s, x) = clamp(s + 0.5, ker.lo, ker.hi)
+_tr_up1(ker::TwoRegimeKernel, s, x) = clamp(0.7 * s, ker.lo, ker.hi)
+_tr_up2(ker::TwoRegimeKernel, s, x) =
+    clamp(1.1 * s + 0.1 * x, ker.lo, ker.hi)
+
+function ContinuousDPs._branch_sum(f, ker::TwoRegimeKernel, s, x, args...)
+    s < ker.thresh && return f(_tr_low(ker, s, x), 1.0, args...)
+    p = _tr_p(ker, s, x)
+    return f(_tr_up1(ker, s, x), p, args...) +
+           f(_tr_up2(ker, s, x), 1 - p, args...)
+end
+
+function ContinuousDPs._foreach_branch(f, ker::TwoRegimeKernel, s, x,
+                                       args...)
+    if s < ker.thresh
+        f(_tr_low(ker, s, x), 1.0, args...)
+    else
+        p = _tr_p(ker, s, x)
+        f(_tr_up1(ker, s, x), p, args...)
+        f(_tr_up2(ker, s, x), 1 - p, args...)
+    end
+    return nothing
+end
+
+# A general kernel forwarding Float32 branch weights: the weights
+# contract is real-valued, not Float64-only, so assembly boundaries must
+# convert (regression for the sparse-path Float64 restriction)
+struct Float32WeightsKernel{TK} <: ContinuousDPs._TransitionKernel
+    quad::TK
+end
+ContinuousDPs._branch_sum(f, ker::Float32WeightsKernel, s, x, args...) =
+    ContinuousDPs._branch_sum(
+        (sp, w, a...) -> f(sp, Float32(w), a...), ker.quad, s, x, args...)
+ContinuousDPs._foreach_branch(f, ker::Float32WeightsKernel, s, x,
+                              args...) =
+    ContinuousDPs._foreach_branch(
+        (sp, w, a...) -> f(sp, Float32(w), a...), ker.quad, s, x, args...)
+
+# A kernel that wrongly opts into the FOC solvers without providing the
+# indexed access they require: the workspace-creation guard must reject
+# it with an informative error (regression for the capability check)
+struct BadFOCKernel{TK} <: ContinuousDPs._TransitionKernel
+    quad::TK
+end
+ContinuousDPs._branch_sum(f, ker::BadFOCKernel, s, x, args...) =
+    ContinuousDPs._branch_sum(f, ker.quad, s, x, args...)
+ContinuousDPs._foreach_branch(f, ker::BadFOCKernel, s, x, args...) =
+    ContinuousDPs._foreach_branch(f, ker.quad, s, x, args...)
+ContinuousDPs._forces_brent(::BadFOCKernel) = false
+
+function ContinuousDPs._draw_next_state(rng::ContinuousDPs.Random.AbstractRNG,
+                                        ker::TwoRegimeKernel, s, x)
+    s < ker.thresh && return _tr_low(ker, s, x)
+    # Strict `<`, matching the structured sampler's convention (a draw
+    # equal to the cumulative boundary selects the next branch), so that
+    # deterministic boundary tests are unambiguous across representations
+    return rand(rng) < _tr_p(ker, s, x) ? _tr_up1(ker, s, x) :
+                                          _tr_up2(ker, s, x)
 end
 
 @testset "Callable shock weights" begin
@@ -300,6 +376,41 @@ end
         end
     end
 
+    @testset "kernel-carrying problem solves through the general tier" begin
+        # A ContinuousDP may carry a ready-made kernel in its weights
+        # slot (the injection point used by the generic-model adapter);
+        # solving then uses only the general contract: Brent is forced,
+        # the policy system assembles through the traversal, simulate
+        # draws through _draw_next_state
+        res_q = solve(cdp_fixed, CollocationSolver(basis); verbose=0)
+        gen = ListTestKernel(_build_kernel(_colloc(res_q)))
+        cdp_k = ContinuousDP(f=f, g=nothing, discount=beta,
+                             shocks=Float64[], weights=gen,
+                             x_lb=x_lb, x_ub=x_ub)
+        res_fb = solve(cdp_fixed,
+                       CollocationSolver(basis; inner_solver=:brent);
+                       verbose=0)
+        for alg in (PFI, VFI)
+            solver = CollocationSolver(basis; algorithm=alg,
+                                       inner_solver=:brent, max_iter=500)
+            res_k = solve(cdp_k, solver; verbose=0)
+            @test res_k.converged
+            res_ref = alg === PFI ? res_fb :
+                solve(cdp_fixed, CollocationSolver(basis; algorithm=VFI,
+                                                   inner_solver=:brent,
+                                                   max_iter=500);
+                      verbose=0)
+            @test res_k.C ≈ res_ref.C rtol=1e-6
+            @test res_k.X ≈ res_ref.X rtol=1e-4
+        end
+        # FOC request silently degrades to Brent (general kernels force it)
+        res_foc = solve(cdp_k, CollocationSolver(basis); verbose=0)
+        @test res_foc.C ≈ res_fb.C rtol=1e-6
+        # simulate draws through the kernel contract
+        path = simulate(ContinuousDPs.Random.Xoshiro(7), res_foc, 1.0, 20)
+        @test all(s -> s_min <= s <= s_max, path)
+    end
+
     @testset "validation errors" begin
         # Wrong arity
         cdp_bad = ContinuousDP(cdp_fixed; weights=(a, b, c) -> Tuple(weights))
@@ -437,5 +548,143 @@ end
         cdp_nothing = ContinuousDP(cdp_trunc; weights=s -> nothing)
         @test_throws r"indexable collection" solve(
             cdp_nothing, CollocationSolver(basis); verbose=0)
+    end
+
+    @testset "non-Float64 weights through both assembly paths" begin
+        # The weights contract is real-valued: Float32 (or integer)
+        # probabilities are valid. The dense path promotes via
+        # `discount * w`; the sparse path must convert at the assembly
+        # boundary. Solve the same model with Float64 and Float32 static
+        # callable weights on a spline (sparse) and a Chebyshev (dense)
+        # basis and require agreement.
+        w32 = SVector{n_shocks,Float32}(weights)
+        cdp_32 = ContinuousDP(cdp_fixed; weights=s -> w32)
+        basis_sp = Basis(SplineParams(
+            collect(range(s_min, s_max, length=25)), 0, 3))
+        for b in (basis, basis_sp)
+            res_64 = solve(cdp_fixed, CollocationSolver(b); verbose=0)
+            res_32 = solve(cdp_32, CollocationSolver(b); verbose=0)
+            @test res_32.converged
+            # Float32 weights perturb the model at ~eps(Float32),
+            # amplified by 1/(1 - discount): measured ~4e-5 here. An
+            # assembly bug would err at O(1).
+            @test maximum(abs, res_32.C - res_64.C) < 2e-4
+        end
+
+        # A general kernel forwarding Float32 weights exercises the
+        # traversal-based assembly payloads on both paths
+        res_q = solve(cdp_fixed, CollocationSolver(basis); verbose=0)
+        gen32 = Float32WeightsKernel(_build_kernel(_colloc(res_q)))
+        cdp_g32 = ContinuousDP(f=f, g=nothing, discount=beta,
+                               shocks=Float64[], weights=gen32,
+                               x_lb=x_lb, x_ub=x_ub)
+        for b in (basis, basis_sp)
+            res_g = solve(cdp_g32, CollocationSolver(b); verbose=0)
+            @test res_g.converged
+            res_ref = solve(cdp_fixed,
+                            CollocationSolver(b; inner_solver=:brent);
+                            verbose=0)
+            @test maximum(abs, res_g.C - res_ref.C) < 2e-4
+        end
+    end
+
+    @testset "FOC opt-in capability guard" begin
+        res_q = solve(cdp_fixed, CollocationSolver(basis); verbose=0)
+        bad = BadFOCKernel(_build_kernel(_colloc(res_q)))
+        cdp_bad = ContinuousDP(f=f, g=nothing, discount=beta,
+                               shocks=Float64[], weights=bad,
+                               x_lb=x_lb, x_ub=x_ub)
+        # Opting into FOC (_forces_brent == false) without the indexed
+        # access: informative error at solve entry (workspace creation),
+        # not a MethodError mid-sweep
+        @test_throws r"indexed branch access" solve(
+            cdp_bad, CollocationSolver(basis); verbose=0)
+        # The same kernel works on the derivative-free path
+        res_bad = solve(cdp_bad,
+                        CollocationSolver(basis; inner_solver=:brent);
+                        verbose=0)
+        @test res_bad.converged
+    end
+
+    @testset "dynamic-support general kernel" begin
+        ker = TwoRegimeKernel(1.5, s_min, s_max)
+        cdp_k = ContinuousDP(f=f, g=nothing, discount=beta,
+                             shocks=Float64[], weights=ker,
+                             x_lb=x_lb, x_ub=x_ub)
+
+        res = solve(cdp_k, CollocationSolver(basis); verbose=0)
+        @test res.converged
+
+        # Expected value agrees with the hand-written two-regime sum
+        fec = FunEvalCache(basis)
+        C = res.C
+        V(sp) = funeval(C, basis, [sp])[1]
+        for s in (0.5, 1.7, 3.2), x in (0.3 * s, 0.6 * s)
+            ref = s < ker.thresh ? V(_tr_low(ker, s, x)) :
+                _tr_p(ker, s, x) * V(_tr_up1(ker, s, x)) +
+                (1 - _tr_p(ker, s, x)) * V(_tr_up2(ker, s, x))
+            @test ContinuousDPs._expected_value(ker, fec, C, s, x) ≈
+                  ref rtol=1e-12
+        end
+
+        # PFI (dense policy-system assembly through the traversal) and
+        # VFI agree; a spline basis exercises the sparse assembly
+        res_vfi = solve(cdp_k, CollocationSolver(basis; algorithm=VFI,
+                                                 max_iter=2000);
+                        verbose=0)
+        @test res_vfi.converged
+        @test maximum(abs, res.C - res_vfi.C) < 1e-5
+        basis_sp = Basis(SplineParams(
+            collect(range(s_min, s_max, length=25)), 0, 3))
+        res_sp = solve(cdp_k, CollocationSolver(basis_sp); verbose=0)
+        @test res_sp.converged
+        # The generic sparse assembly must agree with an independent
+        # solve of the same problem: convergence alone would not catch a
+        # systematically wrong transition row (an incorrect system can
+        # still be invertible and converge)
+        res_sp_vfi = solve(cdp_k, CollocationSolver(basis_sp;
+                                                    algorithm=VFI,
+                                                    max_iter=2000);
+                           verbose=0)
+        @test res_sp_vfi.converged
+        @test maximum(abs, res_sp.C - res_sp_vfi.C) < 1e-5
+
+        # Simulation follows the same support and probabilities: every
+        # step lands on a branch of the current regime, and both upper
+        # branches occur
+        path = simulate(ContinuousDPs.Random.Xoshiro(11), res, 1.0, 200)
+        pf = ContinuousDPs.PolicyFunction(res)
+        up1 = up2 = 0
+        for t in 1:199
+            s, sp = path[t], path[t + 1]
+            x = pf(s)
+            if s < ker.thresh
+                @test sp == _tr_low(ker, s, x)
+            else
+                @test sp in (_tr_up1(ker, s, x), _tr_up2(ker, s, x))
+                up1 += sp == _tr_up1(ker, s, x)
+                up2 += sp == _tr_up2(ker, s, x)
+            end
+        end
+        @test up1 > 0
+        @test up2 > 0
+
+        # Deterministic boundary draws pin the branch-selection
+        # convention to the structured sampler's strict `r < p`: a draw
+        # equal to the boundary selects the second branch, a draw just
+        # below it the first
+        let s = 2.0, xq = 0.8
+            p = _tr_p(ker, s, xq)
+            @test ContinuousDPs._draw_next_state(
+                ScriptedRNG([p]), ker, s, xq) == _tr_up2(ker, s, xq)
+            @test ContinuousDPs._draw_next_state(
+                ScriptedRNG([prevfloat(p)]), ker, s, xq) ==
+                _tr_up1(ker, s, xq)
+        end
+
+        # LQA linearizes cdp.g, which an injected kernel replaces:
+        # rejected with an informative error
+        @test_throws r"ready-made transition kernel" solve(
+            cdp_k, LQASolver(basis; point=(1.0, 0.4, 1.0)))
     end
 end

@@ -10,23 +10,22 @@ The general contract is:
 - `_branch_sum(f, ker, s, x, args...)`: return the sum of
   `f(s', w, args...)` over the branches at `(s, x)`;
 - `_foreach_branch(f, ker, s, x, args...)`: call `f(s', w, args...)` on
-  each branch at `(s, x)` (the intended seam for side-effecting
-  consumers such as a future generic policy-assembly path);
+  each branch at `(s, x)` (for side-effecting consumers such as
+  policy-system row assembly);
+- `_draw_next_state(rng, ker, s, x)`: draw a next state from the branch
+  distribution — required only when `simulate!` support is desired;
 - `_forces_brent(ker)`: whether the first-order-condition inner solver
   must fall back to Brent. Defaults to `true`: the FOC paths additionally
   require the indexed access described under [`_QuadratureKernel`](@ref),
   which a general kernel need not provide.
 
-These operations suffice for the generic Bellman expectation
-(`_expected_value`), Brent maximization, and discrete-action
-enumeration. They do NOT yet cover policy-system assembly or simulation:
-both currently consume the structured tier only (`_policy_system_lu`
-assembles rows with the indexed primitives directly, and `simulate!`
-draws a branch index with the `_QuadratureKernel` helper
-`_draw_branch_index` and maps it into the shock nodes). A general-kernel
-sampling hook — a `_draw_next_state` returning the next state itself,
-since a general kernel need not expose stable branch indices — is to be
-introduced together with its first consumer.
+These operations cover the generic Bellman expectation
+(`_expected_value`), Brent maximization, discrete-action enumeration,
+policy-evaluation system assembly (`_append_state_rows!` via
+`_foreach_branch`), and — when `_draw_next_state` is implemented —
+simulation. A general kernel need not expose stable branch indices:
+`_draw_branch_index` is a helper of the structured `_QuadratureKernel`,
+not part of this contract.
 
 In the traversals, `f` is a top-level function and `args` its explicit
 payload. This avoids a capturing closure (which would materialize on the
@@ -118,6 +117,32 @@ _fetch_weights(sw::_StateActionWeights, s, x) =
 _forces_brent(ker::_QuadratureKernel) =
     ker.weights isa _StateActionWeights
 
+# A kernel that opts into the FOC solvers (`_forces_brent(ker) == false`)
+# must provide the structured tier's indexed access; verified once at
+# workspace creation (with the probe-point types), so that a kernel
+# declaring more than it implements fails with an informative error
+# instead of a MethodError deep in the sweep. The remaining opt-in
+# requirements — stable branch count/identity under action perturbations
+# and action-independent probabilities (see `_TransitionKernel`) — are
+# semantic and cannot be machine-checked; they stay the kernel author's
+# responsibility.
+_check_foc_capability(::_QuadratureKernel, cp) = nothing
+function _check_foc_capability(ker::_TransitionKernel, cp)
+    # The probe point is computed here, not by the caller, so that the
+    # structured no-op above never evaluates the user's bound functions
+    s = _row(cp.interp.S, 1)
+    x = _probe_action(cp.cdp.actions, s)
+    (hasmethod(_branch_weights, Tuple{typeof(ker),typeof(s),typeof(x)}) &&
+     hasmethod(_branch_state,
+               Tuple{typeof(ker),typeof(s),typeof(x),Int})) ||
+        throw(ArgumentError(
+            "kernel $(typeof(ker)) opts into the FOC solvers " *
+            "(_forces_brent == false) but does not provide the indexed " *
+            "branch access (_branch_weights, _branch_state) they " *
+            "require; see the _TransitionKernel documentation"))
+    return nothing
+end
+
 # Branch weights at (s, x), as an indexable collection aligned with the
 # branch indices. Fixed quadrature weights ignore (s, x).
 _branch_weights(ker::_QuadratureKernel, s, x) =
@@ -181,6 +206,14 @@ solvers.
 _build_kernel(cdp::ContinuousDP, s_probe, x_probe) =
     _build_kernel_w(cdp.weights, cdp, s_probe, x_probe)
 
+# A problem may carry a ready-made kernel in its weights slot (the
+# internal representation used e.g. by the POMDPs generic-model
+# adapter); construction is then a passthrough and nothing is probed.
+# The constructor's weights processing likewise passes it through.
+_build_kernel_w(ker::_TransitionKernel, cdp::ContinuousDP,
+                s_probe, x_probe) = ker
+_process_weights(ker::_TransitionKernel, shocks) = ker
+
 _build_kernel_w(w::AbstractVector, cdp::ContinuousDP, s_probe, x_probe) =
     _QuadratureKernel(cdp.g, cdp.shocks, w)
 
@@ -215,7 +248,10 @@ use instead of silently truncating the branch loop.
 """
 function _validate_weights(cp::_CollocationProblem)
     cdp = cp.cdp
-    cdp.weights isa AbstractVector && return nothing
+    # Fixed weights are validated at construction; a ready-made kernel
+    # owns its transition law and nothing is probed
+    (cdp.weights isa AbstractVector ||
+     cdp.weights isa _TransitionKernel) && return nothing
     s_probe = _row(cp.interp.S, 1)
     x_probe = _probe_action(cdp.actions, s_probe)
     ker = _build_kernel(cdp, s_probe, x_probe)
@@ -255,7 +291,9 @@ _probe_action(a::ContinuousActions{M}, s) where {M} =
 
 function _build_kernel(cp::_CollocationProblem)
     cdp = cp.cdp
-    # Fixed weights probe nothing: no user function is evaluated here
+    # Ready-made kernels and fixed weights probe nothing: no user
+    # function is evaluated here
+    cdp.weights isa _TransitionKernel && return cdp.weights
     cdp.weights isa AbstractVector &&
         return _QuadratureKernel(cdp.g, cdp.shocks, cdp.weights)
     s_probe = _row(cp.interp.S, 1)
@@ -283,6 +321,20 @@ function _check_sampling_weights(w)
         "(missing mass acts as extra discounting) but have no defined " *
         "sampling semantics"))
     return total
+end
+
+"""
+    _draw_next_state(rng, ker, s, x)
+
+Draw a next state from the branch distribution at `(s, x)`. Part of the
+general `_TransitionKernel` contract for kernels used with `simulate!`;
+the structured kernel draws a branch index by inverse CDF and evaluates
+its next state. There is no generic fallback: a general kernel that
+should support simulation defines its own method.
+"""
+function _draw_next_state(rng::AbstractRNG, ker::_QuadratureKernel, s, x)
+    j = _draw_branch_index(rng, ker, s, x)
+    return _branch_state(ker, s, x, j)
 end
 
 # Draw a branch index from the branch distribution at (s, x) by inverse
