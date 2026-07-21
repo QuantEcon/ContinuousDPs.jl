@@ -126,8 +126,11 @@ ContinuousDPs._forces_brent(::BadFOCKernel) = false
 function ContinuousDPs._draw_next_state(rng::ContinuousDPs.Random.AbstractRNG,
                                         ker::TwoRegimeKernel, s, x)
     s < ker.thresh && return _tr_low(ker, s, x)
-    return rand(rng) <= _tr_p(ker, s, x) ? _tr_up1(ker, s, x) :
-                                           _tr_up2(ker, s, x)
+    # Strict `<`, matching the structured sampler's convention (a draw
+    # equal to the cumulative boundary selects the next branch), so that
+    # deterministic boundary tests are unambiguous across representations
+    return rand(rng) < _tr_p(ker, s, x) ? _tr_up1(ker, s, x) :
+                                          _tr_up2(ker, s, x)
 end
 
 @testset "Callable shock weights" begin
@@ -635,6 +638,16 @@ end
             collect(range(s_min, s_max, length=25)), 0, 3))
         res_sp = solve(cdp_k, CollocationSolver(basis_sp); verbose=0)
         @test res_sp.converged
+        # The generic sparse assembly must agree with an independent
+        # solve of the same problem: convergence alone would not catch a
+        # systematically wrong transition row (an incorrect system can
+        # still be invertible and converge)
+        res_sp_vfi = solve(cdp_k, CollocationSolver(basis_sp;
+                                                    algorithm=VFI,
+                                                    max_iter=2000);
+                           verbose=0)
+        @test res_sp_vfi.converged
+        @test maximum(abs, res_sp.C - res_sp_vfi.C) < 1e-5
 
         # Simulation follows the same support and probabilities: every
         # step lands on a branch of the current regime, and both upper
@@ -655,6 +668,19 @@ end
         end
         @test up1 > 0
         @test up2 > 0
+
+        # Deterministic boundary draws pin the branch-selection
+        # convention to the structured sampler's strict `r < p`: a draw
+        # equal to the boundary selects the second branch, a draw just
+        # below it the first
+        let s = 2.0, xq = 0.8
+            p = _tr_p(ker, s, xq)
+            @test ContinuousDPs._draw_next_state(
+                ScriptedRNG([p]), ker, s, xq) == _tr_up2(ker, s, xq)
+            @test ContinuousDPs._draw_next_state(
+                ScriptedRNG([prevfloat(p)]), ker, s, xq) ==
+                _tr_up1(ker, s, xq)
+        end
 
         # LQA linearizes cdp.g, which an injected kernel replaces:
         # rejected with an informative error
