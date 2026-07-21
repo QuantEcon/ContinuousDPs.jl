@@ -117,6 +117,32 @@ _fetch_weights(sw::_StateActionWeights, s, x) =
 _forces_brent(ker::_QuadratureKernel) =
     ker.weights isa _StateActionWeights
 
+# A kernel that opts into the FOC solvers (`_forces_brent(ker) == false`)
+# must provide the structured tier's indexed access; verified once at
+# workspace creation (with the probe-point types), so that a kernel
+# declaring more than it implements fails with an informative error
+# instead of a MethodError deep in the sweep. The remaining opt-in
+# requirements — stable branch count/identity under action perturbations
+# and action-independent probabilities (see `_TransitionKernel`) — are
+# semantic and cannot be machine-checked; they stay the kernel author's
+# responsibility.
+_check_foc_capability(::_QuadratureKernel, cp) = nothing
+function _check_foc_capability(ker::_TransitionKernel, cp)
+    # The probe point is computed here, not by the caller, so that the
+    # structured no-op above never evaluates the user's bound functions
+    s = _row(cp.interp.S, 1)
+    x = _probe_action(cp.cdp.actions, s)
+    (hasmethod(_branch_weights, Tuple{typeof(ker),typeof(s),typeof(x)}) &&
+     hasmethod(_branch_state,
+               Tuple{typeof(ker),typeof(s),typeof(x),Int})) ||
+        throw(ArgumentError(
+            "kernel $(typeof(ker)) opts into the FOC solvers " *
+            "(_forces_brent == false) but does not provide the indexed " *
+            "branch access (_branch_weights, _branch_state) they " *
+            "require; see the _TransitionKernel documentation"))
+    return nothing
+end
+
 # Branch weights at (s, x), as an indexable collection aligned with the
 # branch indices. Fixed quadrature weights ignore (s, x).
 _branch_weights(ker::_QuadratureKernel, s, x) =

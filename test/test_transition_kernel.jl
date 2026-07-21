@@ -97,6 +97,18 @@ function ContinuousDPs._foreach_branch(f, ker::TwoRegimeKernel, s, x,
     return nothing
 end
 
+# A kernel that wrongly opts into the FOC solvers without providing the
+# indexed access they require: the workspace-creation guard must reject
+# it with an informative error (regression for the capability check)
+struct BadFOCKernel{TK} <: ContinuousDPs._TransitionKernel
+    quad::TK
+end
+ContinuousDPs._branch_sum(f, ker::BadFOCKernel, s, x, args...) =
+    ContinuousDPs._branch_sum(f, ker.quad, s, x, args...)
+ContinuousDPs._foreach_branch(f, ker::BadFOCKernel, s, x, args...) =
+    ContinuousDPs._foreach_branch(f, ker.quad, s, x, args...)
+ContinuousDPs._forces_brent(::BadFOCKernel) = false
+
 function ContinuousDPs._draw_next_state(rng::ContinuousDPs.Random.AbstractRNG,
                                         ker::TwoRegimeKernel, s, x)
     s < ker.thresh && return _tr_low(ker, s, x)
@@ -519,6 +531,24 @@ end
         cdp_nothing = ContinuousDP(cdp_trunc; weights=s -> nothing)
         @test_throws r"indexable collection" solve(
             cdp_nothing, CollocationSolver(basis); verbose=0)
+    end
+
+    @testset "FOC opt-in capability guard" begin
+        res_q = solve(cdp_fixed, CollocationSolver(basis); verbose=0)
+        bad = BadFOCKernel(_build_kernel(_colloc(res_q)))
+        cdp_bad = ContinuousDP(f=f, g=nothing, discount=beta,
+                               shocks=Float64[], weights=bad,
+                               x_lb=x_lb, x_ub=x_ub)
+        # Opting into FOC (_forces_brent == false) without the indexed
+        # access: informative error at solve entry (workspace creation),
+        # not a MethodError mid-sweep
+        @test_throws r"indexed branch access" solve(
+            cdp_bad, CollocationSolver(basis); verbose=0)
+        # The same kernel works on the derivative-free path
+        res_bad = solve(cdp_bad,
+                        CollocationSolver(basis; inner_solver=:brent);
+                        verbose=0)
+        @test res_bad.converged
     end
 
     @testset "dynamic-support general kernel" begin

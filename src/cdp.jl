@@ -670,9 +670,14 @@ function CDPWorkspace(cp::_CollocationProblem{N};
     basis = interp.basis
     n = interp.length
     discrete = cdp.actions isa DiscreteActions
+    ker = _build_kernel(cp)
     dfecs = if !discrete && inner_solver == :foc &&
                all(d -> _foc_suitable(basis.params[d]), 1:N) &&
-               !_forces_brent(_build_kernel(cp))
+               !_forces_brent(ker)
+        # A kernel that opts into the FOC path must actually provide the
+        # indexed access the FOC solvers require: fail here with an
+        # informative error rather than with a MethodError mid-sweep
+        _check_foc_capability(ker, cp)
         ntuple(d -> DerivFunEvalCache(
                    basis, ntuple(i -> Int(i == d), Val(N))), Val(N))
     else
