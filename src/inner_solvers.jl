@@ -11,7 +11,7 @@ Find the optimal value and action at a given state `s`.
 # Arguments
 
 - `cdp::ContinuousDP`: The dynamic program.
-- `ker::_QuadratureKernel`: Its transition kernel (see `_build_kernel`).
+- `ker::_TransitionKernel`: Its transition kernel (see `_build_kernel`).
 - `s`: State point at which to maximize.
 - `C`: Basis coefficient vector for the value function.
 - `fec::FunEvalCache`: Workspace for evaluating the value function at the
@@ -22,7 +22,7 @@ Find the optimal value and action at a given state `s`.
 - `v::Float64`: Optimal value at `s`.
 - `x::Float64`: Optimal action at `s`.
 """
-function _s_wise_max!(cdp::ContinuousDP, ker::_QuadratureKernel, s, C,
+function _s_wise_max!(cdp::ContinuousDP, ker::_TransitionKernel, s, C,
                       fec::FunEvalCache)
     cdp.actions isa ContinuousActions || throw(ArgumentError(
         "Brent maximization requires a continuous action space; discrete " *
@@ -43,7 +43,7 @@ end
 
 # Inner objective H(x) = f(s, x) + beta * E[V^(g(s, x, e))]; short-circuits
 # on non-finite flow rewards (infeasible actions)
-function _objective(cdp::ContinuousDP, ker::_QuadratureKernel, s, C,
+function _objective(cdp::ContinuousDP, ker::_TransitionKernel, s, C,
                     fec::FunEvalCache, x)
     flow = cdp.f(s, x)
     isfinite(flow) || return flow
@@ -63,7 +63,7 @@ discrete action set.
 - `k::Int`: Index of the optimal action in `cdp.actions.vals` (the first
   index if every action is infeasible; ties go to the lowest index).
 """
-function _s_wise_max_discrete!(cdp::ContinuousDP, ker::_QuadratureKernel,
+function _s_wise_max_discrete!(cdp::ContinuousDP, ker::_TransitionKernel,
                                s, C, fec::FunEvalCache)
     vals = cdp.actions.vals
     v, k = -Inf, 1
@@ -114,7 +114,7 @@ are never called at infeasible actions); if no adequate step exists,
 - `H::Float64`, `Hp::Float64`: Objective value and derivative (may be
   non-finite, in which case the caller should fall back to Brent).
 """
-function _objective_and_deriv(cdp::ContinuousDP, ker::_QuadratureKernel,
+function _objective_and_deriv(cdp::ContinuousDP, ker::_TransitionKernel,
                               s, C, fec::FunEvalCache,
                               dfecs, x::Float64, x_lb::Float64,
                               x_ub::Float64)
@@ -163,7 +163,7 @@ detected from the sign of `H'` during the bracketing expansion.
 
 The coefficients of `dfecs` must have been set with `set_coefs!(., C)`.
 """
-function _s_wise_max_foc!(cdp::ContinuousDP, ker::_QuadratureKernel, s, C,
+function _s_wise_max_foc!(cdp::ContinuousDP, ker::_TransitionKernel, s, C,
                           fec::FunEvalCache, dfecs, x_prev::Float64)
     lb, ub = Float64(cdp.actions.x_lb(s)), Float64(cdp.actions.x_ub(s))
     width = ub - lb
@@ -287,7 +287,7 @@ _use_foc(ws::CDPWorkspace) = ws.inner_solver == :foc && ws.dfecs !== nothing
 # differences of the user's f and g in each action dimension; any non-finite
 # intermediate makes the result non-finite, which callers treat as a signal
 # to fall back. Writes -H and -grad H (Optim minimizes).
-function _negH_multi!(G, cdp::ContinuousDP, ker::_QuadratureKernel, s, C,
+function _negH_multi!(G, cdp::ContinuousDP, ker::_TransitionKernel, s, C,
                       fec::FunEvalCache{N},
                       dfecs, x::Vector{Float64}, lb::Vector{Float64},
                       ub::Vector{Float64}, ::Val{M}) where {N,M}
@@ -369,7 +369,7 @@ Brent maximization on any failure or non-finite outcome; with
 
 Writes the maximizer into `xout` and returns the maximized value.
 """
-function _s_wise_max_multi!(cdp::ContinuousDP, ker::_QuadratureKernel,
+function _s_wise_max_multi!(cdp::ContinuousDP, ker::_TransitionKernel,
                             s, C, fec::FunEvalCache,
                             dfecs, xout::AbstractVector{Float64},
                             use_foc::Bool)

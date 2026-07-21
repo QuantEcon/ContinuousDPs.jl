@@ -1,7 +1,7 @@
 using ContinuousDPs: CollocationSolver, CDPWorkspace, FunEvalCache,
                      _colloc, _build_kernel, _forces_brent, _objective,
                      _StateWeights, _StateActionWeights, bellman_operator!,
-                     _check_sampling_weights
+                     _check_sampling_weights, _TransitionKernel
 using BasisMatrices: Basis, ChebParams, funeval
 using QuantEcon: qnwlogn
 using StaticArrays: SVector
@@ -16,6 +16,46 @@ ScriptedRNG(vals) = ScriptedRNG(collect(Float64, vals), 0)
 ContinuousDPs.Random.rand(rng::ScriptedRNG) = (rng.i += 1; rng.vals[rng.i])
 ContinuousDPs.Random.rand(rng::ScriptedRNG, n::Integer) =
     [ContinuousDPs.Random.rand(rng) for _ in 1:n]
+
+# Top-level recorder for the direct _foreach_branch contract test: the
+# visited (s_next, weight) pairs accumulate into the explicit mutable
+# payload (the contract's no-capturing-closure pattern)
+function record_branch(sp, w, states, probs)
+    push!(states, sp)
+    push!(probs, w)
+    return nothing
+end
+
+# A minimal kernel implementing only the general _TransitionKernel
+# contract (no indexed access): branches materialized as a per-(s, x)
+# list, delegating their computation to a wrapped quadrature kernel.
+# Stands in for future kernels with (s, x)-dependent supports.
+struct ListTestKernel{TK} <: ContinuousDPs._TransitionKernel
+    quad::TK
+end
+
+function ContinuousDPs._branch_sum(f, ker::ListTestKernel, s, x,
+                                   args...)
+    q = ker.quad
+    w = ContinuousDPs._branch_weights(q, s, x)
+    branches = [(ContinuousDPs._branch_state(q, s, x, j), w[j])
+                for j in eachindex(w)]
+    acc = 0.0
+    for (sp, wj) in branches
+        acc += f(sp, wj, args...)
+    end
+    return acc
+end
+
+function ContinuousDPs._foreach_branch(f, ker::ListTestKernel, s, x,
+                                       args...)
+    q = ker.quad
+    w = ContinuousDPs._branch_weights(q, s, x)
+    for j in eachindex(w)
+        f(ContinuousDPs._branch_state(q, s, x, j), w[j], args...)
+    end
+    return nothing
+end
 
 @testset "Callable shock weights" begin
     alpha, beta = 0.4, 0.96
@@ -193,6 +233,71 @@ ContinuousDPs.Random.rand(rng::ScriptedRNG, n::Integer) =
         path_c = simulate(ScriptedRNG([1.0]), res_zc, s0, 2)
         @test path_f[2] == expected
         @test path_c[2] == expected
+    end
+
+    @testset "general kernel contract (two-tier seam)" begin
+        res = solve(cdp_fixed, CollocationSolver(basis); verbose=0)
+        cp = _colloc(res)
+        quad = _build_kernel(cp)
+        gen = ListTestKernel(quad)
+        fec = FunEvalCache(basis)
+        C = res.C
+
+        # A kernel without indexed access must force Brent
+        @test _forces_brent(gen)
+
+        # The general-contract path reproduces the structured kernel
+        # through every derivative-free consumer. Agreement is to roundoff,
+        # not bitwise: the generic traversal and the specialized loop may
+        # compile with different multiply-add fusion (the bit-identity
+        # contract applies to the structured path against the pre-kernel
+        # code, not between the two tiers).
+        for s in (0.5, 1.7, 3.2)
+            @test ContinuousDPs._expected_value(gen, fec, C, s, 0.4 * s) ≈
+                  ContinuousDPs._expected_value(quad, fec, C, s, 0.4 * s) rtol=1e-14
+            v_g, x_g = ContinuousDPs._s_wise_max!(cdp_fixed, gen, s, C, fec)
+            v_q, x_q = ContinuousDPs._s_wise_max!(cdp_fixed, quad, s, C,
+                                                  fec)
+            @test v_g ≈ v_q rtol=1e-12
+            @test x_g ≈ x_q atol=1e-6
+        end
+
+        # _foreach_branch directly, for both tiers: each branch visited
+        # exactly once in branch order, next states and weights forwarded
+        # unchanged, the explicit payload reaching the top-level callback,
+        # and a `nothing` return
+        let s = 1.7, xa = 0.5 * s
+            wref = ContinuousDPs._branch_weights(quad, s, xa)
+            spref = [ContinuousDPs._branch_state(quad, s, xa, j)
+                     for j in eachindex(wref)]
+            for ker in (quad, gen)
+                states = Float64[]
+                probs = Float64[]
+                ret = ContinuousDPs._foreach_branch(record_branch, ker, s,
+                                                    xa, states, probs)
+                @test ret === nothing
+                @test states == spref
+                @test probs == collect(wref)
+            end
+        end
+
+        # Discrete enumeration through the general contract
+        x_grid = collect(range(0.005, 3.0, length=20))
+        fd(s, x) = x <= s - 1e-4 ? log(x) : -Inf
+        cdp_d = ContinuousDP(f=fd, g=g, discount=beta, shocks=shocks,
+                             weights=weights,
+                             actions=DiscreteActions(x_grid))
+        res_d = solve(cdp_d, CollocationSolver(basis); verbose=0)
+        quad_d = _build_kernel(_colloc(res_d))
+        gen_d = ListTestKernel(quad_d)
+        for s in (0.5, 1.7, 3.2)
+            v_g, k_g = ContinuousDPs._s_wise_max_discrete!(
+                cdp_d, gen_d, s, res_d.C, fec)
+            v_q, k_q = ContinuousDPs._s_wise_max_discrete!(
+                cdp_d, quad_d, s, res_d.C, fec)
+            @test v_g ≈ v_q rtol=1e-12
+            @test k_g == k_q
+        end
     end
 
     @testset "validation errors" begin
