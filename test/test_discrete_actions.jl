@@ -1,5 +1,6 @@
 using BasisMatrices: funeval
-using ContinuousDPs: CDPWorkspace, FunEvalCache, _s_wise_max_discrete!
+using ContinuousDPs: CDPWorkspace, FunEvalCache, _s_wise_max_discrete!,
+                     _build_kernel, _colloc
 
 @testset "DiscreteActions" begin
     s_min, s_max = 0.1, 2.0
@@ -44,7 +45,8 @@ using ContinuousDPs: CDPWorkspace, FunEvalCache, _s_wise_max_discrete!
         C = res.C
         fec = FunEvalCache(basis)
         for s in (s_min, 0.7, 1.3, s_max)
-            v, k = _s_wise_max_discrete!(cdp_d, s, C, fec)
+            v, k = _s_wise_max_discrete!(cdp_d, _build_kernel(_colloc(res)),
+                                         s, C, fec)
             # reference: objective via funeval at all actions
             H = [begin
                      flow = f_growth(s, x)

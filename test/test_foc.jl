@@ -1,4 +1,5 @@
-using ContinuousDPs: CDPWorkspace, set_coefs!, _s_wise_max_foc!, _s_wise_max!
+using ContinuousDPs: CDPWorkspace, set_coefs!, _s_wise_max_foc!,
+                     _s_wise_max!, _build_kernel
 using QuantEcon: qnwlogn
 
 @testset "FOC inner solver" begin
@@ -49,11 +50,12 @@ using QuantEcon: qnwlogn
         colloc_cdp = ContinuousDPs._colloc(res)
         ws = CDPWorkspace(colloc_cdp)
         foreach(dfec -> set_coefs!(dfec, res.C), ws.dfecs)
+        ker = _build_kernel(colloc_cdp)
         for i in 1:colloc_cdp.interp.length
             s = colloc_cdp.interp.S[i]
-            v_foc, x_foc = _s_wise_max_foc!(colloc_cdp.cdp, s, res.C,
+            v_foc, x_foc = _s_wise_max_foc!(colloc_cdp.cdp, ker, s, res.C,
                                             ws.fec, ws.dfecs, NaN)
-            v_brent, x_brent = _s_wise_max!(colloc_cdp.cdp, s, res.C,
+            v_brent, x_brent = _s_wise_max!(colloc_cdp.cdp, ker, s, res.C,
                                             ws.fec)
             @test v_foc ≈ v_brent rtol=1e-8
             @test x_foc ≈ x_brent atol=1e-6
@@ -92,7 +94,8 @@ using QuantEcon: qnwlogn
         colloc_cdp = ContinuousDPs._colloc(res)
         ws = CDPWorkspace(colloc_cdp)
         foreach(dfec -> set_coefs!(dfec, res.C), ws.dfecs)
-        v, x = _s_wise_max_foc!(colloc_cdp.cdp, colloc_cdp.interp.S[1],
+        v, x = _s_wise_max_foc!(colloc_cdp.cdp, _build_kernel(colloc_cdp),
+                                colloc_cdp.interp.S[1],
                                 res.C, ws.fec, ws.dfecs, NaN)
         @test x ≈ 1.0 atol=1e-6
     end

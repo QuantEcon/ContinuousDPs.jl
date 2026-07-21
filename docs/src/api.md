@@ -10,7 +10,7 @@ CurrentModule = ContinuousDPs
 
 ```@docs
 ContinuousDP
-ContinuousDP(::Any, ::Any, ::Real, ::AbstractVecOrMat, ::Vector{Float64},
+ContinuousDP(::Any, ::Any, ::Real, ::AbstractVecOrMat, ::Any,
              ::ActionSpace)
 ContinuousDP(::ContinuousDP)
 ```

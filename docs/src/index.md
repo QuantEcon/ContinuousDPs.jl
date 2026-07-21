@@ -33,8 +33,10 @@ where
     multi-dimensional and discrete actions are also supported --- see below),
 - ``f(s, x)`` is the **reward** function,
 - ``g(s, x, \varepsilon)`` is the **state transition** function,
-- ``\varepsilon`` is a **random shock**,
-    (i.i.d. across periods, independent of the state and the action),
+- ``\varepsilon`` is a **random shock**
+    (with fixed `weights`, i.i.d. across periods; callable `weights`
+    instead specify a conditional distribution at each current state or
+    state-action pair --- see below),
 - ``\beta \in (0, 1)`` is the **discount factor**, and
 - ``x_{\mathrm{lb}}(s)`` and ``x_{\mathrm{ub}}(s)`` are state-dependent
     **action bounds**.
@@ -71,6 +73,42 @@ functions are then stored as `n x M` matrices), or `DiscreteActions(vals)`
 for a finite set of actions of arbitrary type (solved by exact enumeration,
 with `res.X_ind` holding the indices of the optimal actions into `vals`). `DiscreteActions(vals)` represents a fixed finite action set; for
 state-dependent infeasibility, return `-Inf` from `f(s, x)`.
+
+### State- and action-dependent shock distributions
+
+The distribution of the shock may depend on the current state and action.
+Three patterns, in increasing order of generality:
+
+1. **Distribution shifted by the state or action** (e.g. a productivity
+   shock whose mean depends on ``s``): absorb the dependence into the
+   transition function `g` itself, keeping fixed `shocks`/`weights` for a
+   baseline innovation. No special support is needed.
+2. **State-dependent probabilities over fixed outcomes** (e.g. a disaster
+   that occurs with probability ``p(s)``): pass a *callable* as `weights`.
+   A function `weights(s)` is called with the current state and must
+   return the probability weights of the shock nodes at `s` (one weight
+   per node).
+3. **Action-dependent probabilities** (e.g. a search effort ``x`` that
+   succeeds with probability ``\lambda(x)``): pass a two-argument callable
+   `weights(s, x)`. Since the weights then enter the first-order condition,
+   the inner maximization automatically uses the derivative-free Brent
+   method in this case.
+
+A callable `weights` returning a `Tuple` (or a statically-sized vector
+such as a `StaticArrays.SVector`) keeps the solver's inner loops
+allocation-free; returning a freshly allocated `Vector` also works at a
+small cost. Callable weights are probed once at solve initialization for
+an indexable, real-valued return with one entry per shock node (an
+exception from the probe is tolerated, since the probe state-action pair
+need not be feasible), and every evaluation during the solve checks that
+the returned length matches the shock support. The solver does not
+require the weights to sum to one: weights that sum to less than one are
+permitted and act as additional discounting (e.g. exogenous exit risk).
+`simulate`, by contrast, requires a proper probability vector at every
+visited state-action pair — the missing mass has no path-wise
+interpretation — and rejects negative, non-finite, or non-unit-sum
+weights. As always, keep `g(s, x, e)` within the approximation domain for
+every shock node with positive weight.
 
 The solution methodology --- the interpolation basis and the algorithm
 parameters --- is specified separately by a solver object:
