@@ -256,7 +256,10 @@ Give either `actions`, or both `x_lb` and `x_ub` (equivalent to
   apply, the state-action form is used). A callable returning a `Tuple`
   or a statically-sized vector (e.g. a `StaticArrays.SVector`) keeps the
   solver sweeps allocation-free; returning a freshly allocated `Vector`
-  is supported but allocation-lean. At solve initialization, callable
+  is supported but allocation-lean. The callable is evaluated on every
+  objective evaluation of the inner maximization (several times per
+  visited state), so it should be cheap; precompute anything expensive
+  outside it. At solve initialization, callable
   weights are probed once for an indexable, real-valued return with one
   entry per shock node; because the probe state-action pair need not be
   feasible, an exception from that probe is tolerated. Regardless of the
@@ -1486,14 +1489,17 @@ function simulate!(rng::AbstractRNG, s_path::VecOrMat,
         # which would otherwise index one past the last shock. (The clamp
         # also covers proper weights whose cumsum rounds slightly below
         # one — a latent out-of-bounds edge predating the kernel work.)
+        # The clamp target is the last positive-weight branch, matching
+        # the callable path in _draw_branch_index: an overshooting draw
+        # must not select a trailing zero-probability branch.
         total = _check_sampling_weights(res.cdp.weights)
         cdf = cumsum(res.cdp.weights)
-        n_shocks = length(cdf)
+        last_pos = findlast(>(0.0), res.cdp.weights)  # exists: total ≈ 1
         r = rand(rng, ts_length - 1)
         e_ind = Array{Int}(undef, ts_length - 1)
         for t in 1:ts_length - 1
             e_ind[t] = min(searchsortedlast(cdf, r[t] * total) + 1,
-                           n_shocks)
+                           last_pos)
         end
         for t in 1:ts_length - 1
             s = s_path[(s_ind_front..., t)...]

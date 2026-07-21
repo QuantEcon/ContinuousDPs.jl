@@ -172,6 +172,29 @@ ContinuousDPs.Random.rand(rng::ScriptedRNG, n::Integer) =
         end
     end
 
+    @testset "overshooting draws never select a trailing zero branch" begin
+        # A draw that lands exactly on cdf[end] (reachable when r * total
+        # rounds up) must select the last positive-weight branch, not a
+        # trailing zero-probability one. ScriptedRNG feeds r = 1.0 to hit
+        # the boundary deterministically; the fixed and callable paths
+        # must agree (the callable path's `last` guard vs the fixed
+        # path's clamp to the last positive branch).
+        shocks3 = [1.2, 0.8, 0.5]
+        w3 = [0.5, 0.5, 0.0]
+        cdp_zf = ContinuousDP(f=f, g=g, discount=beta, shocks=shocks3,
+                              weights=w3, x_lb=x_lb, x_ub=x_ub)
+        cdp_zc = ContinuousDP(cdp_zf; weights=s -> (0.5, 0.5, 0.0))
+        res_zf = solve(cdp_zf, CollocationSolver(basis); verbose=0)
+        res_zc = solve(cdp_zc, CollocationSolver(basis); verbose=0)
+        s0 = 1.0
+        pf = ContinuousDPs.PolicyFunction(res_zf)
+        expected = g(s0, pf(s0), shocks3[2])  # branch 2: last positive
+        path_f = simulate(ScriptedRNG([1.0]), res_zf, s0, 2)
+        path_c = simulate(ScriptedRNG([1.0]), res_zc, s0, 2)
+        @test path_f[2] == expected
+        @test path_c[2] == expected
+    end
+
     @testset "validation errors" begin
         # Wrong arity
         cdp_bad = ContinuousDP(cdp_fixed; weights=(a, b, c) -> Tuple(weights))

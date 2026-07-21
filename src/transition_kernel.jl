@@ -19,7 +19,11 @@ value of an interpolant is provided by `_expected_value`.
 Allocation contract: a callable weights function returning a `Tuple` or a
 statically-sized vector (e.g. a `StaticArrays.SVector`) keeps the sweeps
 allocation-free; returning a freshly allocated `Vector` is supported but
-makes the path allocation-lean instead.
+makes the path allocation-lean instead. Cost contract: the callable is
+invoked on every objective evaluation of the inner maximization — several
+times per state per sweep, not once per state — so it should be cheap;
+anything expensive belongs in a table or interpolant precomputed outside
+the callable.
 """
 struct _QuadratureKernel{TG,TR<:AbstractVecOrMat,TW}
     g::TG
