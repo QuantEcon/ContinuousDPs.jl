@@ -17,6 +17,15 @@ ContinuousDPs.Random.rand(rng::ScriptedRNG) = (rng.i += 1; rng.vals[rng.i])
 ContinuousDPs.Random.rand(rng::ScriptedRNG, n::Integer) =
     [ContinuousDPs.Random.rand(rng) for _ in 1:n]
 
+# Top-level recorder for the direct _foreach_branch contract test: the
+# visited (s_next, weight) pairs accumulate into the explicit mutable
+# payload (the contract's no-capturing-closure pattern)
+function record_branch(sp, w, states, probs)
+    push!(states, sp)
+    push!(probs, w)
+    return nothing
+end
+
 # A minimal kernel implementing only the general _TransitionKernel
 # contract (no indexed access): branches materialized as a per-(s, x)
 # list, delegating their computation to a wrapped quadrature kernel.
@@ -251,6 +260,25 @@ end
                                                   fec)
             @test v_g ≈ v_q rtol=1e-12
             @test x_g ≈ x_q atol=1e-6
+        end
+
+        # _foreach_branch directly, for both tiers: each branch visited
+        # exactly once in branch order, next states and weights forwarded
+        # unchanged, the explicit payload reaching the top-level callback,
+        # and a `nothing` return
+        let s = 1.7, xa = 0.5 * s
+            wref = ContinuousDPs._branch_weights(quad, s, xa)
+            spref = [ContinuousDPs._branch_state(quad, s, xa, j)
+                     for j in eachindex(wref)]
+            for ker in (quad, gen)
+                states = Float64[]
+                probs = Float64[]
+                ret = ContinuousDPs._foreach_branch(record_branch, ker, s,
+                                                    xa, states, probs)
+                @test ret === nothing
+                @test states == spref
+                @test probs == collect(wref)
+            end
         end
 
         # Discrete enumeration through the general contract

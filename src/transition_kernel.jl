@@ -5,26 +5,43 @@ Abstract supertype of internal transition-kernel representations: the
 distribution of the next state given `(s, x)`, as finitely many weighted
 branches `(s'_k, w_k)`.
 
-The general contract, sufficient for every derivative-free consumer (the
-Brent objectives via `_expected_value`, discrete-action enumeration, the
-policy-evaluation system assembly, and simulation), is:
+The general contract is:
 
 - `_branch_sum(f, ker, s, x, args...)`: return the sum of
   `f(s', w, args...)` over the branches at `(s, x)`;
 - `_foreach_branch(f, ker, s, x, args...)`: call `f(s', w, args...)` on
-  each branch at `(s, x)` (for side-effecting consumers such as row
-  assembly);
-
-`f` is a top-level function and `args` its payload: passing the payload
-explicitly rather than capturing it in a closure is what keeps these
-traversals allocation-free (captured-variable closures materialize on
-the heap here).
-- `_draw_branch_index(rng, ker, s, x)`: draw a branch index from the
-  branch distribution (used by `simulate!`);
+  each branch at `(s, x)` (the intended seam for side-effecting
+  consumers such as a future generic policy-assembly path);
 - `_forces_brent(ker)`: whether the first-order-condition inner solver
   must fall back to Brent. Defaults to `true`: the FOC paths additionally
   require the indexed access described under [`_QuadratureKernel`](@ref),
   which a general kernel need not provide.
+
+These operations suffice for the generic Bellman expectation
+(`_expected_value`), Brent maximization, and discrete-action
+enumeration. They do NOT yet cover policy-system assembly or simulation:
+both currently consume the structured tier only (`_policy_system_lu`
+assembles rows with the indexed primitives directly, and `simulate!`
+draws a branch index with the `_QuadratureKernel` helper
+`_draw_branch_index` and maps it into the shock nodes). A general-kernel
+sampling hook — a `_draw_next_state` returning the next state itself,
+since a general kernel need not expose stable branch indices — is to be
+introduced together with its first consumer.
+
+In the traversals, `f` is a top-level function and `args` its explicit
+payload. This avoids a capturing closure (which would materialize on the
+heap here), but the generic traversal indirection is nevertheless not
+allocation-free under the current implementation: measurements show
+roughly 50-80 bytes per call. Allocation-sensitive structured consumers
+therefore retain direct `_QuadratureKernel` specializations.
+
+Opting into the FOC solvers by overriding `_forces_brent(ker) = false`
+declares more than the traversal contract: such a kernel must
+additionally provide the structured tier's indexed access
+(`_branch_weights`, `_branch_state`) with a stable branch count and
+stable branch identity under action perturbations, and branch
+probabilities that do not depend on the action (the FOC solvers do not
+compute probability derivatives).
 """
 abstract type _TransitionKernel end
 
@@ -47,7 +64,9 @@ the FOC solvers rely: derivative-based consumers re-evaluate
 `_branch_state` at perturbed actions holding the branch index fixed.
 Hence `_forces_brent` is `false` for fixed or state-only weights, `true`
 for action-dependent weights (whose derivative term the FOC solvers do
-not compute).
+not compute). The sampling helper `_draw_branch_index(rng, ker, s, x)`
+(used by `simulate!` for callable weights) also lives at this tier: it
+returns an index into the fixed shock nodes.
 
 Allocation contract: a callable weights function returning a `Tuple` or a
 statically-sized vector (e.g. a `StaticArrays.SVector`) keeps the sweeps
