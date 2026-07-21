@@ -47,7 +47,7 @@ function ContinuousDPs._branch_sum(f, ker::ListTestKernel, s, x,
     return acc
 end
 
-ContinuousDPs._draw_next_state(rng::ContinuousDPs.AbstractRNG,
+ContinuousDPs._draw_next_state(rng::ContinuousDPs.Random.AbstractRNG,
                                ker::ListTestKernel, s, x) =
     ContinuousDPs._draw_next_state(rng, ker.quad, s, x)
 
