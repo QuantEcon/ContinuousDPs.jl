@@ -45,13 +45,18 @@ _sub_state_rows!(A, i, fec, ker::_TransitionKernel, s, x, discount) =
     w = _branch_weights(ker, s, x)
     for j in eachindex(w)
         s_next = _branch_state(ker, s, x, j)
-        _append_basis_row!(Is, Js, Vs, i, fec, s_next, w[j])
+        # Convert at the assembly boundary: the weights contract is
+        # real-valued (e.g. Float32 or integer probabilities are valid),
+        # while the row writer takes a Float64 coefficient. The dense
+        # path promotes implicitly through `discount * w`; the sparse
+        # path must convert explicitly.
+        _append_basis_row!(Is, Js, Vs, i, fec, s_next, Float64(w[j]))
     end
     return nothing
 end
 
 _append_row_payload(sp, w, Is, Js, Vs, i, fec) =
-    _append_basis_row!(Is, Js, Vs, i, fec, sp, w)
+    _append_basis_row!(Is, Js, Vs, i, fec, sp, Float64(w))
 _append_state_rows!(Is, Js, Vs, i, fec, ker::_TransitionKernel, s, x) =
     _foreach_branch(_append_row_payload, ker, s, x, Is, Js, Vs, i, fec)
 

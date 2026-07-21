@@ -97,6 +97,20 @@ function ContinuousDPs._foreach_branch(f, ker::TwoRegimeKernel, s, x,
     return nothing
 end
 
+# A general kernel forwarding Float32 branch weights: the weights
+# contract is real-valued, not Float64-only, so assembly boundaries must
+# convert (regression for the sparse-path Float64 restriction)
+struct Float32WeightsKernel{TK} <: ContinuousDPs._TransitionKernel
+    quad::TK
+end
+ContinuousDPs._branch_sum(f, ker::Float32WeightsKernel, s, x, args...) =
+    ContinuousDPs._branch_sum(
+        (sp, w, a...) -> f(sp, Float32(w), a...), ker.quad, s, x, args...)
+ContinuousDPs._foreach_branch(f, ker::Float32WeightsKernel, s, x,
+                              args...) =
+    ContinuousDPs._foreach_branch(
+        (sp, w, a...) -> f(sp, Float32(w), a...), ker.quad, s, x, args...)
+
 # A kernel that wrongly opts into the FOC solvers without providing the
 # indexed access they require: the workspace-creation guard must reject
 # it with an informative error (regression for the capability check)
@@ -531,6 +545,44 @@ end
         cdp_nothing = ContinuousDP(cdp_trunc; weights=s -> nothing)
         @test_throws r"indexable collection" solve(
             cdp_nothing, CollocationSolver(basis); verbose=0)
+    end
+
+    @testset "non-Float64 weights through both assembly paths" begin
+        # The weights contract is real-valued: Float32 (or integer)
+        # probabilities are valid. The dense path promotes via
+        # `discount * w`; the sparse path must convert at the assembly
+        # boundary. Solve the same model with Float64 and Float32 static
+        # callable weights on a spline (sparse) and a Chebyshev (dense)
+        # basis and require agreement.
+        w32 = SVector{n_shocks,Float32}(weights)
+        cdp_32 = ContinuousDP(cdp_fixed; weights=s -> w32)
+        basis_sp = Basis(SplineParams(
+            collect(range(s_min, s_max, length=25)), 0, 3))
+        for b in (basis, basis_sp)
+            res_64 = solve(cdp_fixed, CollocationSolver(b); verbose=0)
+            res_32 = solve(cdp_32, CollocationSolver(b); verbose=0)
+            @test res_32.converged
+            # Float32 weights perturb the model at ~eps(Float32),
+            # amplified by 1/(1 - discount): measured ~4e-5 here. An
+            # assembly bug would err at O(1).
+            @test maximum(abs, res_32.C - res_64.C) < 2e-4
+        end
+
+        # A general kernel forwarding Float32 weights exercises the
+        # traversal-based assembly payloads on both paths
+        res_q = solve(cdp_fixed, CollocationSolver(basis); verbose=0)
+        gen32 = Float32WeightsKernel(_build_kernel(_colloc(res_q)))
+        cdp_g32 = ContinuousDP(f=f, g=nothing, discount=beta,
+                               shocks=Float64[], weights=gen32,
+                               x_lb=x_lb, x_ub=x_ub)
+        for b in (basis, basis_sp)
+            res_g = solve(cdp_g32, CollocationSolver(b); verbose=0)
+            @test res_g.converged
+            res_ref = solve(cdp_fixed,
+                            CollocationSolver(b; inner_solver=:brent);
+                            verbose=0)
+            @test maximum(abs, res_g.C - res_ref.C) < 2e-4
+        end
     end
 
     @testset "FOC opt-in capability guard" begin
