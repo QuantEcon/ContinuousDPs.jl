@@ -80,7 +80,9 @@ ALWAYS run these validation steps after making changes:
 │   ├── policy_system.jl     # Policy-evaluation collocation system assembly
 │   └── lq_approx.jl         # Linear quadratic approximation methods
 ├── ext/
-│   └── ContinuousDPsPOMDPsExt.jl    # POMDPs.jl interface (weakdeps: POMDPs, POMDPTools)
+│   ├── ContinuousDPsPOMDPsExt.jl    # POMDPs.jl interface (weakdeps: POMDPs, POMDPTools)
+│   └── examples/
+│       └── cdp_ex_odu_pomdps.jl     # odu belief MDP via the POMDPs.jl interface (two definition styles)
 ├── docs/
 │   ├── make.jl              # Documenter build script
 │   └── src/                 # Documentation source files
@@ -147,6 +149,7 @@ ALWAYS run these validation steps after making changes:
 - Activated by the dual-trigger weakdeps `[POMDPs, POMDPTools]`. The PUBLIC surface is the solver direction: `POMDPs.solve(::CollocationSolver, m)` solves any explicit-finite POMDPs MDP (finite actions, explicit transition distributions, continuous states covered by the basis) via `_POMDPKernel`, a general-tier `_TransitionKernel` wrapping `weighted_iterator(transition(m, s, x))`; returns `CollocationPolicy <: POMDPs.Policy`. Requirement checks at solve time: finite actions, no terminal state at any collocation node (v1 rejects; zero-reward self-loop encoding is the planned follow-up), at least one feasible action per node (models legitimately error on infeasible pairs — never call them there), reward arity chosen by probe call (direct `r(m,s,x)` preferred; expected form via `_branch_sum` otherwise — a performance choice, both are correct).
 - The MODEL direction (`as_mdp`, `CDPMDP{S,A}` with `S = Float64` or `NTuple{N,Float64}` via the `statedim` keyword) is INTERNAL: ext-local, unexported (access: `Base.get_extension(ContinuousDPs, :ContinuousDPsPOMDPsExt).as_mdp`), serving as round-trip test infrastructure. Its public naming is deferred; the eventual generic belongs to QuantEcon.jl (never publicize a ContinuousDPs-owned `as_mdp`).
 - The extension consumes only public API, the functors, and the kernel contract — never sweep internals or result fields beyond the documented ones. States cross the boundary as indexable coordinate points (documented contract).
+- `ext/examples/cdp_ex_odu_pomdps.jl`: the odu belief MDP defined through the POMDPs.jl interface (explicit problem type and QuickMDP, cross-checked to bit-identical coefficients) and solved via `POMDPs.solve(CollocationSolver(basis), m)`; the native twin is `examples/cdp_ex_odu.jl`. The `ext/examples/` placement is DELIBERATE (the script requires the weakdep trigger packages) — do not move it to `examples/`.
 
 ### Out-of-domain next states (common pitfall)
 Candidate actions explored during the inner maximization can map the next state outside the interpolation domain, where the fitted value function is extrapolated. For Chebyshev bases such extrapolation is astronomically large and can silently destroy a solve. Any test or benchmark model must keep `g(s, x, e)` within the domain for all feasible actions and shocks (clamp inside `g`, or tighten `x_lb`/`x_ub`). See PR #97 for background.
