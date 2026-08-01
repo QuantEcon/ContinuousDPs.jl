@@ -200,7 +200,7 @@ POMDPs.reward(::Typed2DMDP, s::NTuple{2,Float64}, x::Symbol) =
               POMDPs.action(policy_u, (1.5, 0.5))
     end
 
-    @testset "model direction (internal as_mdp)" begin
+    @testset "model export (internal as_mdp)" begin
         m = PExt.as_mdp(cdp_native; initialstate=1.0)
         @test m isa POMDPs.MDP{Float64,Float64}
         d = POMDPs.transition(m, 1.0, x_grid[3])
@@ -260,7 +260,7 @@ POMDPs.reward(::Typed2DMDP, s::NTuple{2,Float64}, x::Symbol) =
         @test_throws r"scalar initial state" PExt.as_mdp(
             cdp2; statedim=2, initialstate=1.0)
 
-        # Callable weights are not supported by the model direction
+        # Callable weights are not supported by model export
         cdp_cw = ContinuousDP(cdp_native; weights=s -> weights)
         @test_throws r"fixed weights" PExt.as_mdp(cdp_cw)
     end

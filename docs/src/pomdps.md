@@ -68,21 +68,25 @@ POMDPs.simulate(RolloutSimulator(max_steps=100), m, policy, 1.0)
 
 ## Requirements and scope
 
-`POMDPs.solve` checks its requirements at solve time and throws an
-informative error when one fails:
+`POMDPs.solve` checks its requirements at solve time where feasible and
+throws an informative error when a check fails:
 
 - **Finite explicit actions.** `actions(m)` must return a finite
   collection. A state-dependent restriction via `actions(m, s)` is
   supported and mapped to infeasibility; every collocation node needs at
-  least one feasible action. The model's `transition` and `reward` are
-  never evaluated on infeasible state--action pairs.
+  least one feasible action, and `actions(m, s)` must be a subset of
+  `actions(m)` (actions outside the global set are not seen by the
+  solver). The model's `transition` and `reward` are never evaluated on
+  infeasible state--action pairs.
 - **Explicit transition distributions.** `transition(m, s, x)` must
   return a distribution with explicitly enumerable support and
   probabilities (`SparseCat`, `Deterministic`, ... --- anything
   supporting `POMDPTools.weighted_iterator`). Generative-only models are
   out of scope.
-- **No terminal states** at any collocation node (not supported in this
-  version).
+- **No terminal states** (not supported in this version):
+  `isterminal(m, s)` must be `false` on the entire basis domain. The
+  collocation nodes are checked at solve time; keeping off-node states
+  non-terminal is the model's responsibility.
 - **Rewards** may be defined as `reward(m, s, x)` or
   `reward(m, s, x, sp)`. The arity is chosen once at solve time by a
   probe call, preferring the direct form; with only the

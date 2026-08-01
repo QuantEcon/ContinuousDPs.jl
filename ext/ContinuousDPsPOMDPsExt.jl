@@ -1,11 +1,11 @@
 # POMDPs.jl interface extension: activated when both POMDPs and
 # POMDPTools are loaded.
 #
-# The headline is the SOLVER direction: `POMDPs.solve(::CollocationSolver,
-# m)` solves any explicit-finite POMDPs.jl MDP (finite actions, explicit
+# The headline is MODEL IMPORT: `POMDPs.solve(::CollocationSolver, m)`
+# solves any explicit-finite POMDPs.jl MDP (finite actions, explicit
 # transition distributions, continuous states covered by the solver's
 # basis) by the collocation method, via a transition kernel wrapping the
-# model. The model direction (`as_mdp`, wrapping a `ContinuousDP` as a
+# model. Model export (`as_mdp`, wrapping a `ContinuousDP` as a
 # `POMDPs.MDP`) is internal: it serves as round-trip test infrastructure
 # and its public naming is deferred (the eventual generic belongs to
 # QuantEcon.jl).
@@ -20,7 +20,7 @@ import POMDPs
 using POMDPTools: SparseCat, Deterministic, weighted_iterator
 using Random: AbstractRNG
 
-#= Solver direction: CollocationSolver consumes explicit-finite models =#
+#= Model import: the collocation solver consumes explicit-finite models =#
 
 # Solver-to-model state conversion, fixed once at solve time by probing
 # the first collocation node: the core's coordinate points (scalars in
@@ -119,14 +119,17 @@ end
 Solve an explicit-finite POMDPs.jl MDP by the Bellman equation
 collocation method and return a `CollocationPolicy`.
 
-Requirements on `m` (checked with informative errors): a finite action
-set `actions(m)` (state-dependent restriction via `actions(m, s)` is
-supported and mapped to infeasibility, with at least one feasible action
-at every collocation node); an explicit transition distribution
-(`SparseCat`, `Deterministic`, ... — anything supporting
-`POMDPTools.weighted_iterator`); no terminal state at any collocation
-node (not supported in this version); rewards as `reward(m, s, x)` or
-`reward(m, s, x, sp)`. The state space is
+Requirements on `m` (checked with informative errors where feasible): a
+finite action set `actions(m)` (state-dependent restriction via
+`actions(m, s)` is supported and mapped to infeasibility, with at least
+one feasible action at every collocation node; `actions(m, s)` must be
+a subset of `actions(m)` — actions outside the global set are not seen
+by the solver); an explicit transition distribution (`SparseCat`,
+`Deterministic`, ... — anything supporting
+`POMDPTools.weighted_iterator`); no terminal states: `isterminal(m, s)`
+must be `false` on the entire basis domain (collocation nodes are
+checked; off-node states are the model's responsibility); rewards as
+`reward(m, s, x)` or `reward(m, s, x, sp)`. The state space is
 continuous with the domain and dimension given by the solver's basis.
 States are passed to the model as `statetype(m)` when a conversion from
 the solver's coordinates applies (exact match, a `Tuple` state type, or
@@ -138,10 +141,12 @@ Keyword arguments are forwarded to the native `solve`.
 function POMDPs.solve(solver::CollocationSolver, m::POMDPs.MDP; kwargs...)
     acts = try
         collect(POMDPs.actions(m))
-    catch
+    catch err
+        err isa InterruptException && rethrow()
         throw(ArgumentError(
             "the collocation solver requires an explicit finite action " *
-            "set: `actions(m)` must return a finite collection"))
+            "set: `actions(m)` must return a finite collection " *
+            "(collecting it failed with $(sprint(showerror, err)))"))
     end
     isempty(acts) && throw(ArgumentError("`actions(m)` is empty"))
 
@@ -170,7 +175,8 @@ function POMDPs.solve(solver::CollocationSolver, m::POMDPs.MDP; kwargs...)
     f = try
         POMDPs.reward(m, s1, acts[a1])
         _DirectReward(m, to_state)
-    catch
+    catch err
+        err isa InterruptException && rethrow()
         _ExpectedReward(m, ker)
     end
     cdp = ContinuousDP(f=f, g=nothing, discount=POMDPs.discount(m),
@@ -204,7 +210,7 @@ end
 POMDPs.action(policy::CollocationPolicy, s) = policy.pf(s)
 POMDPs.value(policy::CollocationPolicy, s) = policy.vf(s)
 
-#= Model direction (internal): a ContinuousDP viewed as a POMDPs.MDP =#
+#= Model export (internal): a ContinuousDP viewed as a POMDPs.MDP =#
 
 """
     CDPMDP{S,A} <: POMDPs.MDP{S,A}
@@ -238,13 +244,13 @@ primitives-only `ContinuousDP` does not carry; the state type is
 `initialstate` may be a state, a number (scalar state), or a POMDPs
 distribution; if omitted, `POMDPs.initialstate` throws an informative
 error. Requires a fixed weights vector (callable weights are not
-supported by the model direction) and a scalar or discrete action space.
+supported by model export) and a scalar or discrete action space.
 """
 function as_mdp(cdp::ContinuousDP; initialstate=nothing, statedim::Int=1)
     statedim >= 1 || throw(ArgumentError("statedim must be positive"))
     cdp.weights isa AbstractVector || throw(ArgumentError(
         "as_mdp requires a fixed weights vector (callable weights are " *
-        "not supported by the model direction)"))
+        "not supported by model export)"))
     a = cdp.actions
     a isa ContinuousActions && _action_dim(a) > 1 && throw(ArgumentError(
         "as_mdp supports scalar continuous actions only (the action " *
