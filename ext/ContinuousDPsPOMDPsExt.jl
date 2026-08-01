@@ -252,7 +252,9 @@ function as_mdp(cdp::ContinuousDP; initialstate=nothing, statedim::Int=1)
     S = statedim == 1 ? Float64 : NTuple{statedim,Float64}
     init = if initialstate === nothing
         nothing
-    elseif initialstate isa Real && statedim == 1
+    elseif initialstate isa Real
+        statedim == 1 || throw(ArgumentError(
+            "a scalar initial state requires statedim == 1"))
         Deterministic(Float64(initialstate))
     elseif initialstate isa Union{Tuple,AbstractVector}
         Deterministic(_to_state(S, initialstate))

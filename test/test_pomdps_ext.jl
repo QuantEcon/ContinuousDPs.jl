@@ -256,6 +256,9 @@ POMDPs.reward(::Typed2DMDP, s::NTuple{2,Float64}, x::Symbol) =
         @test rand(Xoshiro(0), POMDPs.initialstate(m2)) == (1.0, 0.5)
         @test_throws ArgumentError POMDPs.solve(
             CollocationSolver(basis), m2; verbose=0)  # 1-D basis, 2-D state
+        # a scalar initial state is rejected for a multidimensional model
+        @test_throws r"scalar initial state" PExt.as_mdp(
+            cdp2; statedim=2, initialstate=1.0)
 
         # Callable weights are not supported by the model direction
         cdp_cw = ContinuousDP(cdp_native; weights=s -> weights)
