@@ -90,10 +90,16 @@ informative error when one fails:
   branches is taken, at the cost of one reward call per branch per
   evaluation.
 - **The state space is continuous**, with the domain and dimension given
-  by the solver's basis. States are passed to the model as indexable
-  coordinate points (a `Float64` for a one-dimensional basis, otherwise
-  an indexable collection of coordinates), and the model's next states
-  must be indexable likewise (scalars, tuples, or static vectors).
+  by the solver's basis. States are passed to the model as `statetype(m)`
+  when a conversion from the solver's coordinates applies: coordinates
+  that already match the state type pass through (always the case for a
+  `Float64` state on a one-dimensional basis), `Tuple` state types such
+  as `NTuple{2,Float64}` get the natural elementwise conversion, and any
+  other state type is routed through `POMDPs.convert_s` when the model
+  provides a method for the coordinate form (an `AbstractVector` of
+  `Float64`). Otherwise states are passed as indexable coordinate
+  points. The model's next states must be indexable (scalars, tuples,
+  or static vectors).
 - **Next states must stay within the basis domain** for every feasible
   action, as everywhere in ContinuousDPs: the fitted value function is
   extrapolated outside the domain, which can silently destroy a solve

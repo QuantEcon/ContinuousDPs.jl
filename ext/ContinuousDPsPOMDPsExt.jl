@@ -22,19 +22,52 @@ using Random: AbstractRNG
 
 #= Solver direction: CollocationSolver consumes explicit-finite models =#
 
+# Solver-to-model state conversion, fixed once at solve time by probing
+# the first collocation node: the core's coordinate points (scalars in
+# 1-D, node-row views in N-D) pass through when they already match
+# `statetype(m)`; `Tuple` state types get the natural elementwise
+# conversion; anything else is routed through `POMDPs.convert_s` when
+# the model provides a method. With no applicable conversion,
+# coordinates pass through under the documented indexable-points
+# contract. Every converter is a no-op on an already-converted state,
+# so nested application is safe.
+struct _TupleState{S} end
+(::_TupleState{S})(s) where {S} = s isa S ? s : convert(S, Tuple(s))
+
+struct _ConvertedState{S,TM<:POMDPs.MDP}
+    m::TM
+end
+(c::_ConvertedState{S})(s) where {S} =
+    s isa S ? s : POMDPs.convert_s(S, s, c.m)
+
+function _state_converter(m::POMDPs.MDP, s_probe)
+    S = POMDPs.statetype(m)
+    s_probe isa S && return identity
+    S <: Tuple && return _TupleState{S}()
+    conv = _ConvertedState{S,typeof(m)}(m)
+    try
+        conv(s_probe)
+        return conv
+    catch err
+        err isa InterruptException && rethrow()
+        return identity
+    end
+end
+
 # Transition kernel wrapping a POMDPs model: branches enumerated from the
 # model's explicit transition distribution at each (s, x). States cross
-# the boundary as the core's indexable coordinate points (scalars or
-# node-row views); the model's next states must likewise be indexable
-# (scalars, tuples, or static vectors).
-struct _POMDPKernel{TM<:POMDPs.MDP} <: _TransitionKernel
+# the boundary through the `to_state` converter above; the model's next
+# states must be indexable (scalars, tuples, or static vectors).
+struct _POMDPKernel{TM<:POMDPs.MDP,TC} <: _TransitionKernel
     m::TM
+    to_state::TC
 end
 
 function ContinuousDPs._branch_sum(f::F, ker::_POMDPKernel, s, x,
                                    args...) where {F}
+    ms = ker.to_state(s)
     acc = 0.0
-    for (sp, w) in weighted_iterator(POMDPs.transition(ker.m, s, x))
+    for (sp, w) in weighted_iterator(POMDPs.transition(ker.m, ms, x))
         acc += f(sp, w, args...)
     end
     return acc
@@ -42,14 +75,15 @@ end
 
 function ContinuousDPs._foreach_branch(f::F, ker::_POMDPKernel, s, x,
                                        args...) where {F}
-    for (sp, w) in weighted_iterator(POMDPs.transition(ker.m, s, x))
+    ms = ker.to_state(s)
+    for (sp, w) in weighted_iterator(POMDPs.transition(ker.m, ms, x))
         f(sp, w, args...)
     end
     return nothing
 end
 
 ContinuousDPs._draw_next_state(rng::AbstractRNG, ker::_POMDPKernel, s, x) =
-    rand(rng, POMDPs.transition(ker.m, s, x))
+    rand(rng, POMDPs.transition(ker.m, ker.to_state(s), x))
 
 # Reward wrappers: infeasible pairs (x outside actions(m, s)) get -Inf
 # per the DiscreteActions convention, and the model's transition/reward
@@ -57,11 +91,14 @@ ContinuousDPs._draw_next_state(rng::AbstractRNG, ker::_POMDPKernel, s, x) =
 # time: the direct r(m, s, x) form when the model defines it, otherwise
 # the expected form over the branches (a performance choice: the
 # expected form costs one reward call per branch per evaluation).
-struct _DirectReward{TM<:POMDPs.MDP}
+struct _DirectReward{TM<:POMDPs.MDP,TC}
     m::TM
+    to_state::TC
 end
-(fr::_DirectReward)(s, x) =
-    x in POMDPs.actions(fr.m, s) ? POMDPs.reward(fr.m, s, x) : -Inf
+function (fr::_DirectReward)(s, x)
+    ms = fr.to_state(s)
+    return x in POMDPs.actions(fr.m, ms) ? POMDPs.reward(fr.m, ms, x) : -Inf
+end
 
 _expected_reward_payload(sp, w, m, s, x) = w * POMDPs.reward(m, s, x, sp)
 
@@ -69,10 +106,12 @@ struct _ExpectedReward{TM<:POMDPs.MDP,TK<:_POMDPKernel}
     m::TM
     ker::TK
 end
-(fr::_ExpectedReward)(s, x) =
-    x in POMDPs.actions(fr.m, s) ?
-        _branch_sum(_expected_reward_payload, fr.ker, s, x, fr.m, s, x) :
+function (fr::_ExpectedReward)(s, x)
+    ms = fr.ker.to_state(s)
+    return x in POMDPs.actions(fr.m, ms) ?
+        _branch_sum(_expected_reward_payload, fr.ker, ms, x, fr.m, ms, x) :
         -Inf
+end
 
 """
     POMDPs.solve(solver::CollocationSolver, m::POMDPs.MDP; kwargs...)
@@ -87,11 +126,14 @@ at every collocation node); an explicit transition distribution
 (`SparseCat`, `Deterministic`, ... — anything supporting
 `POMDPTools.weighted_iterator`); no terminal state at any collocation
 node (not supported in this version); rewards as `reward(m, s, x)` or
-`reward(m, s, x, sp)`. The state space is continuous with the domain and
-dimension given by the solver's basis; states are passed to the model as
-indexable coordinate points, and next states must be indexable likewise.
-The transition distribution must keep the next states within the basis
-domain. Keyword arguments are forwarded to the native `solve`.
+`reward(m, s, x, sp)`. The state space is
+continuous with the domain and dimension given by the solver's basis.
+States are passed to the model as `statetype(m)` when a conversion from
+the solver's coordinates applies (exact match, a `Tuple` state type, or
+a `POMDPs.convert_s` method from the coordinate form), and as indexable
+coordinate points otherwise; next states must be indexable (scalars,
+tuples, or static vectors) and must stay within the basis domain.
+Keyword arguments are forwarded to the native `solve`.
 """
 function POMDPs.solve(solver::CollocationSolver, m::POMDPs.MDP; kwargs...)
     acts = try
@@ -105,8 +147,9 @@ function POMDPs.solve(solver::CollocationSolver, m::POMDPs.MDP; kwargs...)
 
     S = Interp(solver.basis).S
     n = size(S, 1)
+    to_state = _state_converter(m, _row(S, 1))
     for i in 1:n
-        s = _row(S, i)
+        s = to_state(_row(S, i))
         POMDPs.isterminal(m, s) && throw(ArgumentError(
             "terminal states are not supported by the collocation " *
             "solver in this version (state $s at collocation node $i " *
@@ -116,17 +159,17 @@ function POMDPs.solve(solver::CollocationSolver, m::POMDPs.MDP; kwargs...)
             "every node needs at least one action in `actions(m, s)`"))
     end
 
-    ker = _POMDPKernel(m)
+    ker = _POMDPKernel(m, to_state)
     # Reward arity by probe call (hasmethod is unreliable: wrappers like
     # QuickMDP define both arities and dispatch to the stored function).
     # Misclassification is safe: the expected form is correct for either
     # arity through POMDPs' reward(m,s,a,sp) = reward(m,s,a) fallback,
     # only costlier.
-    s1 = _row(S, 1)
+    s1 = to_state(_row(S, 1))
     a1 = something(findfirst(x -> x in POMDPs.actions(m, s1), acts), 1)
     f = try
         POMDPs.reward(m, s1, acts[a1])
-        _DirectReward(m)
+        _DirectReward(m, to_state)
     catch
         _ExpectedReward(m, ker)
     end

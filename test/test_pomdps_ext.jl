@@ -20,6 +20,23 @@ POMDPs.transition(::RestrictedMDP, s, x) = Deterministic(clamp(s, 0.1, 2.0))
 POMDPs.reward(::RestrictedMDP, s, x) = 0.0
 POMDPs.isterminal(::RestrictedMDP, s) = false
 
+# A 2-D MDP whose methods are restricted to the declared state type:
+# solver coordinates must be converted at the package boundary for these
+# methods to dispatch (node-row views would hit MethodErrors, or the
+# global actions(m) fallback instead of actions(m, s))
+struct Typed2DMDP <: POMDPs.MDP{NTuple{2,Float64},Symbol} end
+POMDPs.actions(::Typed2DMDP) = (:stay, :reset)
+POMDPs.actions(::Typed2DMDP, s::NTuple{2,Float64}) = (:stay, :reset)
+POMDPs.discount(::Typed2DMDP) = 0.9
+POMDPs.transition(::Typed2DMDP, s::NTuple{2,Float64}, x::Symbol) =
+    x === :stay ?
+        SparseCat([(clamp(s[1] * e, 0.1, 2.0),
+                    clamp(0.5 * s[2] + 0.25, 0.0, 1.0)) for e in (0.9, 1.1)],
+                  [0.5, 0.5]) :
+        Deterministic((1.0, 0.5))
+POMDPs.reward(::Typed2DMDP, s::NTuple{2,Float64}, x::Symbol) =
+    x === :stay ? log(s[1]) + s[2] : 0.0
+
 @testset "POMDPs extension" begin
     alpha, beta = 0.4, 0.95
     s_min, s_max = 0.1, 2.0
@@ -157,6 +174,30 @@ POMDPs.isterminal(::RestrictedMDP, s) = false
         @test policy.res.C ≈ res_odu.C rtol=1e-8
         @test POMDPs.action(policy, (1.8, 0.5)) === :accept
         @test POMDPs.action(policy, (0.2, 0.5)) === :reject
+    end
+
+    @testset "adapter: typed methods dispatch (NTuple state)" begin
+        basis_t2 = Basis(
+            SplineParams(collect(range(0.1, 2.0, length=8)), 0, 3),
+            SplineParams(collect(range(0.0, 1.0, length=8)), 0, 3))
+        policy = POMDPs.solve(CollocationSolver(basis_t2), Typed2DMDP();
+                              verbose=0)
+        @test policy.res.converged
+        # an untyped twin (QuickMDP closures accept any state form)
+        # gives the identical solution
+        m_u = QuickMDP(
+            statetype = NTuple{2,Float64},
+            actions = [:stay, :reset],
+            discount = 0.9,
+            transition = (s, x) -> POMDPs.transition(Typed2DMDP(),
+                                                     (s[1], s[2]), x),
+            reward = (s, x) -> POMDPs.reward(Typed2DMDP(),
+                                             (s[1], s[2]), x),
+        )
+        policy_u = POMDPs.solve(CollocationSolver(basis_t2), m_u; verbose=0)
+        @test policy.res.C ≈ policy_u.res.C rtol=1e-10
+        @test POMDPs.action(policy, (1.5, 0.5)) ===
+              POMDPs.action(policy_u, (1.5, 0.5))
     end
 
     @testset "model direction (internal as_mdp)" begin
