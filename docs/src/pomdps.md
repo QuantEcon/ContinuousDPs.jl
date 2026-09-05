@@ -20,11 +20,12 @@ state space, complementing the ecosystem's sampling-based planners.
 
 ## Solving a POMDPs.jl model
 
-A stochastic optimal growth model with the savings rate chosen from a
-finite grid, written as a
+A stochastic optimal growth model written as a
 [QuickPOMDPs](https://github.com/JuliaPOMDP/QuickPOMDPs.jl) model and
-solved by collocation (for log utility and Cobb--Douglas technology the
-analytic optimal savings rate is the constant `alpha * beta`):
+solved by collocation. The model's primitives are the familiar ones ---
+reward `f`, transition `g`, and action bounds `x_lb`, `x_ub` --- and the
+feasible actions at a state are declared as an interval, so the
+consumption choice stays continuous:
 
 ```julia
 using ContinuousDPs
@@ -34,13 +35,15 @@ using POMDPs, POMDPTools, QuickPOMDPs
 
 function build_growth_mdp(; alpha = 0.4, beta = 0.95,
                           s_min = 0.1, s_max = 2.0)
-    f(s, x) = log((1 - x) * s)                     # consume the rest
-    g(s, x, e) = clamp((x * s)^alpha * e, s_min, s_max)
+    f(s, x) = log(x)                                # consumption x
+    g(s, x, e) = clamp((s - x)^alpha * e, s_min, s_max)
+    x_lb(s) = s_min
+    x_ub(s) = s
     shocks, weights = qnwlogn(7, 0.0, 0.05^2)
-    x_grid = collect(0.05:0.05:0.95)               # savings rates
     return QuickMDP(
         statetype = Float64,
-        actions = x_grid,
+        actiontype = Float64,
+        actions = s -> ActionInterval(x_lb(s), x_ub(s)),  # continuous
         discount = beta,
         transition = (s, x) -> SparseCat(g.(s, x, shocks), weights),
         reward = f,
@@ -52,13 +55,16 @@ m = build_growth_mdp()
 basis = Basis(ChebParams(30, 0.1, 2.0))
 policy = POMDPs.solve(CollocationSolver(basis), m)
 
-action(policy, 1.0)   # greedy savings rate at s = 1.0: 0.4,
-                      # the grid point closest to alpha * beta = 0.38
+action(policy, 1.0)   # optimal consumption at s = 1.0
 value(policy, 1.0)    # fitted value function at s = 1.0
 
 # The ecosystem's tooling works as usual, e.g. rollout simulation
 POMDPs.simulate(RolloutSimulator(max_steps=100), m, policy, 1.0)
 ```
+
+A finite action set is declared instead by passing the collection as
+`actions` (with `actions(m, s)` optionally restricting it per state);
+the inner maximization is then an exact enumeration.
 
 !!! note "Wrap model definitions in a build function"
     The build-function pattern above is not cosmetic. `QuickMDP`'s
@@ -120,9 +126,11 @@ throws an informative error when a check fails:
 
 The returned `CollocationPolicy` is a standard `POMDPs.Policy`:
 
-- `action(policy, s)` evaluates the computed policy by exact greedy
+- `action(policy, s)` evaluates the computed policy: for a continuous
+  action space by interpolating the solved policy and clamping it into
+  the feasible interval at `s`; for a finite action set by exact greedy
   recomputation at `s` (the solution's coefficients are interpolated;
-  the discrete policy itself is never interpolated);
+  a discrete policy itself is never interpolated);
 - `value(policy, s)` evaluates the fitted value function;
 - the full `CDPSolveResult` remains available as `policy.res`
   (residuals, `set_eval_nodes!`, the native `simulate`).

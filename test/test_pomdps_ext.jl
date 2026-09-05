@@ -157,6 +157,20 @@ POMDPs.transition(m::GrowthIntervalMDP, s, x) =
             @test POMDPs.value(policy, s) ≈
                   ContinuousDPs.ValueFunction(res_c)(s) rtol=1e-8
         end
+        # The same interval declared through QuickMDP's function-valued
+        # `actions` (the adapter never calls the zero-arg actions(m) on
+        # the continuous path): identical solve
+        mq = QuickMDP(
+            statetype = Float64,
+            actiontype = Float64,
+            actions = s -> ActionInterval(1e-4, s - 1e-4),
+            discount = beta,
+            transition = (s, x) -> SparseCat(gd.(s, x, shocks), weights),
+            reward = fd,
+        )
+        policy_q = POMDPs.solve(CollocationSolver(basis), mq; verbose=0)
+        @test policy_q.res.cdp.actions isa ContinuousActions{1}
+        @test policy_q.res.C == policy.res.C
     end
 
     @testset "adapter: requirement checks" begin
