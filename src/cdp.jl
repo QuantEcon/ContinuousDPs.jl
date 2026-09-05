@@ -90,9 +90,7 @@ Continuous action space: an `M`-dimensional box `[x_lb(s), x_ub(s)]` that may
 depend on the state. Construct with `ContinuousActions(x_lb, x_ub)` for
 `M == 1` (with `x_lb(s)`, `x_ub(s)` returning scalars) or
 `ContinuousActions{M}(x_lb, x_ub)` for `M > 1` (with the bound functions
-returning length-`M` tuples or vectors); `ContinuousActions(itv)` with an
-[`ActionInterval`](@ref) gives the state-independent one-dimensional space
-with constant bounds.
+returning length-`M` tuples or vectors).
 
 For `M > 1`, actions are passed to the reward and transition functions as
 length-`M` collections indexable by `x[1], ..., x[M]` (tuples or views), and
@@ -161,9 +159,7 @@ the set-valued counterpart of a one-dimensional `ContinuousActions` at
 one state. Supports `minimum`, `maximum`, `in`, and `rand`. Used at the
 POMDPs.jl interface, where `actions(m, s)` returns the feasible set at a
 state: an `ActionInterval` declares a continuous action space, a finite
-collection a discrete one. Natively, `ContinuousActions(itv)` (or
-`actions = itv` in the `ContinuousDP` constructors) is the
-state-independent continuous action space with these constant bounds.
+collection a discrete one.
 """
 struct ActionInterval
     lo::Float64
@@ -181,10 +177,6 @@ Base.maximum(itv::ActionInterval) = itv.hi
 Base.in(x, itv::ActionInterval) = itv.lo <= x <= itv.hi
 Base.rand(rng::AbstractRNG, itv::ActionInterval) =
     itv.lo + (itv.hi - itv.lo) * rand(rng)
-
-# A constant interval is a state-independent continuous action space
-ContinuousActions(itv::ActionInterval) =
-    ContinuousActions(Returns(itv.lo), Returns(itv.hi))
 
 # Element type of the policy-function container for each action space
 _policy_eltype(::ContinuousActions) = Float64
@@ -335,11 +327,6 @@ end
 
 ContinuousDP(f, g, discount::Real,
              shocks::AbstractVecOrMat, weights,
-             itv::ActionInterval) =
-    ContinuousDP(f, g, discount, shocks, weights, ContinuousActions(itv))
-
-ContinuousDP(f, g, discount::Real,
-             shocks::AbstractVecOrMat, weights,
              x_lb, x_ub) =
     ContinuousDP(f, g, discount, shocks, weights,
                  ContinuousActions(x_lb, x_ub))
@@ -353,7 +340,6 @@ function ContinuousDP(; f, g, discount, shocks, weights,
     else
         (x_lb === nothing && x_ub === nothing) || throw(ArgumentError(
             "the `x_lb`/`x_ub` keywords cannot be combined with `actions`"))
-        actions isa ActionInterval && (actions = ContinuousActions(actions))
         actions isa ActionSpace || throw(ArgumentError(
             "`actions` must be an ActionSpace " *
             "(ContinuousActions or DiscreteActions)"))
