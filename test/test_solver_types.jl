@@ -55,6 +55,19 @@ using QuantEcon: qnwlogn
         @test cdp_disc.actions isa DiscreteActions
         @test cdp_disc.actions.vals == x_grid
 
+        # A constant ActionInterval is a state-independent continuous
+        # action space, accepted by every constructor form
+        itv = ActionInterval(1e-5, 0.5)
+        cdp_i = ContinuousDP(f=f, g=g, discount=beta, shocks=shocks,
+                             weights=weights, actions=itv)
+        @test cdp_i.actions isa ContinuousActions{1}
+        @test cdp_i.actions.x_lb(1.0) == 1e-5
+        @test cdp_i.actions.x_ub(1.0) == 0.5
+        cdp_i2 = @inferred ContinuousDP(f, g, beta, shocks, weights, itv)
+        @test cdp_i2.actions isa ContinuousActions{1}
+        @test ContinuousDP(cdp; actions=itv).actions.x_ub(3.0) == 0.5
+        @test_throws ArgumentError ActionInterval(1.0, 0.5)
+
         # The state dimension is not defined without a solver
         @test_throws MethodError ndims(cdp)
 
