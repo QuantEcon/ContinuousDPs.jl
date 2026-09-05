@@ -15,6 +15,7 @@ makedocs(;
     ),
     pages=[
         "Home" => "index.md",
+        "POMDPs.jl Interface" => "pomdps.md",
         "API Reference" => "api.md",
     ],
     checkdocs=:none,  # Don't error on missing docs

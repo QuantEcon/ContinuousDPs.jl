@@ -21,6 +21,7 @@ ContinuousDP(::ContinuousDP)
 ActionSpace
 ContinuousActions
 DiscreteActions
+ActionInterval
 ```
 
 ### Solving the Model

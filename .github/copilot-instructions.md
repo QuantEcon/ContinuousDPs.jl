@@ -79,6 +79,11 @@ ALWAYS run these validation steps after making changes:
 │   ├── inner_solvers.jl     # Per-state inner maximization paths and sweeps
 │   ├── policy_system.jl     # Policy-evaluation collocation system assembly
 │   └── lq_approx.jl         # Linear quadratic approximation methods
+├── ext/
+│   ├── ContinuousDPsPOMDPsExt.jl    # POMDPs.jl interface (weakdeps: POMDPs, POMDPTools)
+│   └── examples/
+│       ├── cdp_ex_odu_pomdps.jl     # odu belief MDP via the POMDPs.jl interface (two definition styles)
+│       └── cdp_ex_aiyagari_pomdps.jl  # Aiyagari household via the POMDPs.jl interface (continuous assets and savings; two definition styles)
 ├── docs/
 │   ├── make.jl              # Documenter build script
 │   └── src/                 # Documentation source files
@@ -108,7 +113,7 @@ ALWAYS run these validation steps after making changes:
 - Always check `src/point_eval.jl` when modifying interpolant evaluation; its behavior contract is exact agreement with `BasisMatrices.funeval`/`evalbase` (see below)
 - Always check `src/lq_approx.jl` when working with linear quadratic approximations
 - Always run tests in `test/test_point_eval.jl` when modifying `src/point_eval.jl`
-- Always run tests in `test/test_cdp.jl`, `test/test_cdp_multidim.jl`, `test/test_foc.jl`, and `test/test_evaluate_policy.jl` when modifying CDP functionality; add `test/test_transition_kernel.jl` when touching the transition kernel or the weights contract
+- Always run tests in `test/test_cdp.jl`, `test/test_cdp_multidim.jl`, `test/test_foc.jl`, and `test/test_evaluate_policy.jl` when modifying CDP functionality; add `test/test_transition_kernel.jl` when touching the transition kernel or the weights contract, and `test/test_pomdps_ext.jl` when touching the extension
 - Always run tests in `test/test_lq_approx.jl` when modifying LQ approximation
 - Update `benchmark/benchmarks.jl` when internal signatures used there change
 - `README.md`, `docs/src/index.md`, and `examples/cdp_ex_optgrowth_jl.ipynb` share the problem-formulation and interface description and are kept synchronized content-wise: when editing one of them, update the other two to a contextually appropriate extent (they need not be verbatim copies; judge the extent by what changed)
@@ -140,6 +145,12 @@ ALWAYS run these validation steps after making changes:
 - The inner maximization over actions uses the first-order condition by default (`inner_solver=:foc`): for scalar actions, safeguarded root-finding on H'; for M-dimensional actions, box-constrained LBFGS with the analytic gradient (exact interpolant gradients, finite differences of user `f`/`g`, evaluation points clamped into the box). Automatic fallback to the derivative-free path per basis (piecewise linear bases), per state (non-finite values, exceptions), and per call (`inner_solver=:brent`): Brent for scalar actions, cyclic coordinate-wise Brent for M-dimensional ones. Warm starts live in `ws.X`.
 - The scalar-action and discrete-action sweeps over states are allocation-free except for `Optim.maximize`'s small result object on Brent paths; do not introduce per-state allocations there. The `M > 1` continuous-action path is allocation-lean rather than allocation-free (small per-state bounds and optimizer work arrays; the kernel threading added one captured reference per Optim closure, ~1-2% of sweep allocations, re-baselined 2026-07); do not add avoidable allocations. Benchmark allocation columns are watched.
 - `evaluate_policy!` assembles the collocation system with the point kernels, in sparse form when `Phi` is sparse (spline and piecewise linear bases). Preserve this dense/sparse dispatch.
+
+### POMDPs.jl extension (`ext/ContinuousDPsPOMDPsExt.jl`)
+- Activated by the dual-trigger weakdeps `[POMDPs, POMDPTools]`. The PUBLIC surface is MODEL IMPORT: `POMDPs.solve(::CollocationSolver, m)` solves any explicit-finite POMDPs MDP (finite actions, explicit transition distributions, continuous states covered by the basis) via `_POMDPKernel`, a general-tier `_TransitionKernel` wrapping `weighted_iterator(transition(m, s, x))`; returns `CollocationPolicy <: POMDPs.Policy`. Requirement checks at solve time: finite actions or a scalar `ActionInterval` from `actions(m, s)` (continuous actions, Brent inner solver), no terminal states — `isterminal(m, s)` must be `false` on the entire basis domain (collocation nodes are checked; off-node states are the model's responsibility; zero-reward self-loop encoding is the planned follow-up), at least one feasible action per node (models legitimately error on infeasible pairs — never call them there), reward arity chosen by probe call (direct `r(m,s,x)` preferred; expected form via `_branch_sum` otherwise — a performance choice, both are correct).
+- MODEL EXPORT (`as_mdp`, `CDPMDP{S,A}` with `S = Float64` or `NTuple{N,Float64}` via the `statedim` keyword) is INTERNAL: ext-local, unexported (access: `Base.get_extension(ContinuousDPs, :ContinuousDPsPOMDPsExt).as_mdp`), serving as round-trip test infrastructure. Its public naming is deferred; the eventual generic belongs to QuantEcon.jl (never publicize a ContinuousDPs-owned `as_mdp`).
+- The extension consumes only public API, the functors, and the kernel contract — never sweep internals or result fields beyond the documented ones. States cross the boundary as `statetype(m)` where a conversion from the solver's coordinates applies (exact match, `Tuple` state types, or a model-provided `POMDPs.convert_s`), and as indexable coordinate points otherwise (documented contract).
+- `ext/examples/cdp_ex_odu_pomdps.jl`: the odu belief MDP defined through the POMDPs.jl interface (explicit problem type and QuickMDP, cross-checked to bit-identical coefficients) and solved via `POMDPs.solve(CollocationSolver(basis), m)`; the native twin is `examples/cdp_ex_odu.jl`. The `ext/examples/` placement is DELIBERATE (the script requires the weakdep trigger packages) — do not move it to `examples/`.
 
 ### Out-of-domain next states (common pitfall)
 Candidate actions explored during the inner maximization can map the next state outside the interpolation domain, where the fitted value function is extrapolated. For Chebyshev bases such extrapolation is astronomically large and can silently destroy a solve. Any test or benchmark model must keep `g(s, x, e)` within the domain for all feasible actions and shocks (clamp inside `g`, or tighten `x_lb`/`x_ub`). See PR #97 for background.
