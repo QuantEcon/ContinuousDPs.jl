@@ -11,7 +11,8 @@ using POMDPs, POMDPTools
 The extension makes `CollocationSolver` available as a solver for
 POMDPs.jl models: `POMDPs.solve(CollocationSolver(basis), m)` solves any
 *explicit-finite* MDP --- continuous states covered by the basis,
-finitely many actions, and explicit transition distributions --- by the
+finitely many actions or a scalar action interval, and explicit
+transition distributions --- by the
 Bellman equation collocation method, and returns a standard
 `POMDPs.Policy`. This gives POMDPs.jl models access to smooth global
 approximation of the value function and the policy over a continuous
@@ -71,13 +72,18 @@ POMDPs.simulate(RolloutSimulator(max_steps=100), m, policy, 1.0)
 `POMDPs.solve` checks its requirements at solve time where feasible and
 throws an informative error when a check fails:
 
-- **Finite explicit actions.** `actions(m)` must return a finite
-  collection. A state-dependent restriction via `actions(m, s)` is
-  supported and mapped to infeasibility; every collocation node needs at
-  least one feasible action, and `actions(m, s)` must be a subset of
-  `actions(m)` (actions outside the global set are not seen by the
-  solver). The model's `transition` and `reward` are never evaluated on
-  infeasible state--action pairs.
+- **Explicit actions: a finite set or a scalar interval.** Either
+  `actions(m)` returns a finite collection --- a state-dependent
+  restriction via `actions(m, s)` is supported and mapped to
+  infeasibility; every collocation node needs at least one feasible
+  action, and `actions(m, s)` must be a subset of `actions(m)` (actions
+  outside the global set are not seen by the solver); the model's
+  `transition` and `reward` are never evaluated on infeasible
+  state--action pairs --- or `actions(m, s)` returns an
+  [`ActionInterval`](@ref)`(lo, hi)`, declaring a continuous scalar
+  action space with state-dependent bounds; the inner maximization then
+  uses the derivative-free (Brent) solver. Multi-dimensional continuous
+  actions are not supported through this interface.
 - **Explicit transition distributions.** `transition(m, s, x)` must
   return a distribution with explicitly enumerable support and
   probabilities (`SparseCat`, `Deterministic`, ... --- anything

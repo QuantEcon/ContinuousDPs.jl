@@ -13,7 +13,7 @@ module ContinuousDPsPOMDPsExt
 
 using ContinuousDPs
 using ContinuousDPs: CollocationSolver, ContinuousActions, DiscreteActions,
-    Interp, ValueFunction, PolicyFunction,
+    ActionInterval, Interp, ValueFunction, PolicyFunction,
     _action_dim, _policy_eltype, _row,
     _TransitionKernel, _branch_sum, _foreach_branch, _draw_next_state
 import POMDPs
@@ -113,18 +113,30 @@ function (fr::_ExpectedReward)(s, x)
         -Inf
 end
 
+# Action bounds of a continuous action space declared through
+# `actions(m, s)::ActionInterval`, as callables of the solver's coordinates
+struct _IntervalBound{W,TM<:POMDPs.MDP,TC}
+    m::TM
+    to_state::TC
+end
+(b::_IntervalBound{:lo})(s) = minimum(POMDPs.actions(b.m, b.to_state(s)))
+(b::_IntervalBound{:hi})(s) = maximum(POMDPs.actions(b.m, b.to_state(s)))
+
 """
     POMDPs.solve(solver::CollocationSolver, m::POMDPs.MDP; kwargs...)
 
 Solve an explicit-finite POMDPs.jl MDP by the Bellman equation
 collocation method and return a `CollocationPolicy`.
 
-Requirements on `m` (checked with informative errors where feasible): a
-finite action set `actions(m)` (state-dependent restriction via
-`actions(m, s)` is supported and mapped to infeasibility, with at least
-one feasible action at every collocation node; `actions(m, s)` must be
-a subset of `actions(m)` — actions outside the global set are not seen
-by the solver); an explicit transition distribution (`SparseCat`,
+Requirements on `m` (checked with informative errors where feasible):
+an action space given either as a finite action set `actions(m)`
+(state-dependent restriction via `actions(m, s)` is supported and mapped
+to infeasibility, with at least one feasible action at every collocation
+node; `actions(m, s)` must be a subset of `actions(m)` — actions outside
+the global set are not seen by the solver), or as a scalar continuous
+action space declared by `actions(m, s)` returning an
+[`ActionInterval`](@ref) (the inner maximization then uses the
+derivative-free solver); an explicit transition distribution (`SparseCat`,
 `Deterministic`, ... — anything supporting
 `POMDPTools.weighted_iterator`); no terminal states: `isterminal(m, s)`
 must be `false` on the entire basis domain (collocation nodes are
@@ -139,26 +151,44 @@ tuples, or static vectors) and must stay within the basis domain.
 Keyword arguments are forwarded to the native `solve`.
 """
 function POMDPs.solve(solver::CollocationSolver, m::POMDPs.MDP; kwargs...)
-    acts = try
-        collect(POMDPs.actions(m))
-    catch err
-        err isa InterruptException && rethrow()
-        throw(ArgumentError(
-            "the collocation solver requires an explicit finite action " *
-            "set: `actions(m)` must return a finite collection " *
-            "(collecting it failed with $(sprint(showerror, err)))"))
-    end
-    isempty(acts) && throw(ArgumentError("`actions(m)` is empty"))
-
     S = Interp(solver.basis).S
     n = size(S, 1)
     to_state = _state_converter(m, _row(S, 1))
+    s1 = to_state(_row(S, 1))
+
+    # Action space: an ActionInterval from actions(m, s) declares a
+    # scalar continuous action space; otherwise actions(m) must be a
+    # finite collection (with actions(m, s) restricting it per state)
+    acts1 = POMDPs.actions(m, s1)
+    continuous = acts1 isa ActionInterval
+    if continuous
+        actions = ContinuousActions(
+            _IntervalBound{:lo,typeof(m),typeof(to_state)}(m, to_state),
+            _IntervalBound{:hi,typeof(m),typeof(to_state)}(m, to_state))
+        a_probe = 0.5 * (minimum(acts1) + maximum(acts1))
+    else
+        acts = try
+            collect(POMDPs.actions(m))
+        catch err
+            err isa InterruptException && rethrow()
+            throw(ArgumentError(
+                "the collocation solver requires an explicit finite " *
+                "action set: `actions(m)` must return a finite " *
+                "collection, or `actions(m, s)` an `ActionInterval` " *
+                "(collecting it failed with $(sprint(showerror, err)))"))
+        end
+        isempty(acts) && throw(ArgumentError("`actions(m)` is empty"))
+        actions = DiscreteActions(acts)
+        a_probe = acts[something(findfirst(x -> x in acts1, acts), 1)]
+    end
+
     for i in 1:n
         s = to_state(_row(S, i))
         POMDPs.isterminal(m, s) && throw(ArgumentError(
             "terminal states are not supported by the collocation " *
             "solver in this version (state $s at collocation node $i " *
             "is terminal)"))
+        continuous && continue
         any(x -> x in POMDPs.actions(m, s), acts) || throw(ArgumentError(
             "no feasible action at collocation node $i (state $s): " *
             "every node needs at least one action in `actions(m, s)`"))
@@ -170,18 +200,15 @@ function POMDPs.solve(solver::CollocationSolver, m::POMDPs.MDP; kwargs...)
     # Misclassification is safe: the expected form is correct for either
     # arity through POMDPs' reward(m,s,a,sp) = reward(m,s,a) fallback,
     # only costlier.
-    s1 = to_state(_row(S, 1))
-    a1 = something(findfirst(x -> x in POMDPs.actions(m, s1), acts), 1)
     f = try
-        POMDPs.reward(m, s1, acts[a1])
+        POMDPs.reward(m, s1, a_probe)
         _DirectReward(m, to_state)
     catch err
         err isa InterruptException && rethrow()
         _ExpectedReward(m, ker)
     end
     cdp = ContinuousDP(f=f, g=nothing, discount=POMDPs.discount(m),
-                       shocks=Float64[], weights=ker,
-                       actions=DiscreteActions(acts))
+                       shocks=Float64[], weights=ker, actions=actions)
     res = solve(cdp, solver; kwargs...)
     return CollocationPolicy(m, res, ValueFunction(res),
                              PolicyFunction(res))
@@ -282,28 +309,12 @@ POMDPs.reward(m::CDPMDP, s, x) = m.cdp.f(s, x)
 POMDPs.discount(m::CDPMDP) = m.cdp.discount
 POMDPs.isterminal(m::CDPMDP, s) = false
 
-"""
-    CDPActionInterval
-
-Closed interval of feasible actions `[lo, hi]` at a given state, returned
-by `POMDPs.actions(m::CDPMDP, s)` for a continuous action space. Supports
-`rand`, `minimum`, `maximum`, and `in`.
-"""
-struct CDPActionInterval
-    lo::Float64
-    hi::Float64
-end
-
-Base.rand(rng::AbstractRNG, itv::CDPActionInterval) =
-    itv.lo + (itv.hi - itv.lo) * rand(rng)
-Base.minimum(itv::CDPActionInterval) = itv.lo
-Base.maximum(itv::CDPActionInterval) = itv.hi
-Base.in(x, itv::CDPActionInterval) = itv.lo <= x <= itv.hi
-
+# For a continuous action space the feasible set at a state is an
+# ActionInterval (the same representation model import recognizes)
 POMDPs.actions(m::CDPMDP, s) = _actions(m.cdp.actions, s)
 _actions(a::DiscreteActions, s) = a.vals
 _actions(a::ContinuousActions, s) =
-    CDPActionInterval(Float64(a.x_lb(s)), Float64(a.x_ub(s)))
+    ActionInterval(Float64(a.x_lb(s)), Float64(a.x_ub(s)))
 
 function POMDPs.actions(m::CDPMDP)
     a = m.cdp.actions

@@ -37,6 +37,19 @@ POMDPs.transition(::Typed2DMDP, s::NTuple{2,Float64}, x::Symbol) =
 POMDPs.reward(::Typed2DMDP, s::NTuple{2,Float64}, x::Symbol) =
     x === :stay ? log(s[1]) + s[2] : 0.0
 
+# A continuous-action growth model: the feasible set at each state is
+# an ActionInterval with a state-dependent upper bound
+struct GrowthIntervalMDP <: POMDPs.MDP{Float64,Float64}
+    shocks::Vector{Float64}
+    weights::Vector{Float64}
+end
+POMDPs.actions(m::GrowthIntervalMDP, s) = ActionInterval(1e-4, s - 1e-4)
+POMDPs.discount(::GrowthIntervalMDP) = 0.95
+POMDPs.reward(::GrowthIntervalMDP, s, x) = log(x)
+POMDPs.transition(m::GrowthIntervalMDP, s, x) =
+    SparseCat(clamp.(max(s - x, 1e-8)^0.4 .* m.shocks, 0.1, 2.0),
+              m.weights)
+
 @testset "POMDPs extension" begin
     alpha, beta = 0.4, 0.95
     s_min, s_max = 0.1, 2.0
@@ -119,6 +132,31 @@ POMDPs.reward(::Typed2DMDP, s::NTuple{2,Float64}, x::Symbol) =
         mc_se = sqrt(sum(abs2, returns .- mc_mean) / (n_episodes - 1)) /
                 sqrt(n_episodes)
         @test abs(mc_mean - POMDPs.value(policy, s0)) < 5 * mc_se + 0.05
+    end
+
+    @testset "adapter: continuous actions via ActionInterval" begin
+        # The interval declares a continuous scalar action space; the
+        # solve matches the native ContinuousActions problem solved with
+        # the derivative-free inner solver (the general-tier kernel
+        # forces Brent) to roundoff
+        m = GrowthIntervalMDP(shocks, weights)
+        policy = POMDPs.solve(CollocationSolver(basis), m; verbose=0)
+        @test policy.res.converged
+        @test policy.res.cdp.actions isa ContinuousActions{1}
+        cdp_c = ContinuousDP(f=fd, g=gd, discount=beta,
+                             x_lb=s -> 1e-4, x_ub=s -> s - 1e-4,
+                             shocks=shocks, weights=weights)
+        res_c = solve(cdp_c, CollocationSolver(basis; inner_solver=:brent);
+                      verbose=0)
+        @test policy.res.C ≈ res_c.C rtol=1e-8
+        @test policy.res.X ≈ res_c.X rtol=1e-6
+        # action() interpolates the continuous policy and clamps it into
+        # the interval; value() evaluates the fitted value function
+        for s in (0.3, 1.0, 1.7)
+            @test POMDPs.action(policy, s) in POMDPs.actions(m, s)
+            @test POMDPs.value(policy, s) ≈
+                  ContinuousDPs.ValueFunction(res_c)(s) rtol=1e-8
+        end
     end
 
     @testset "adapter: requirement checks" begin
@@ -228,6 +266,7 @@ POMDPs.reward(::Typed2DMDP, s::NTuple{2,Float64}, x::Symbol) =
                                 shocks=shocks, weights=weights)
         mc = PExt.as_mdp(cdp_cont)
         itv = POMDPs.actions(mc, 1.0)
+        @test itv isa ActionInterval
         @test minimum(itv) == 0.01 && maximum(itv) == 0.5
         @test 0.3 in itv && !(0.6 in itv)
         @test 0.01 <= rand(Xoshiro(0), itv) <= 0.5
