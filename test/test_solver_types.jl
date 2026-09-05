@@ -55,6 +55,12 @@ using QuantEcon: qnwlogn
         @test cdp_disc.actions isa DiscreteActions
         @test cdp_disc.actions.vals == x_grid
 
+        # ActionInterval requires finite, ordered bounds
+        @test ActionInterval(0.0, 1.0) isa ActionInterval
+        @test_throws ArgumentError ActionInterval(1.0, 0.5)
+        @test_throws ArgumentError ActionInterval(-Inf, Inf)
+        @test_throws ArgumentError ActionInterval(0.0, NaN)
+
         # The state dimension is not defined without a solver
         @test_throws MethodError ndims(cdp)
 

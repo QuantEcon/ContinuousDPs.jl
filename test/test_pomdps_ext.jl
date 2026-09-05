@@ -37,6 +37,14 @@ POMDPs.transition(::Typed2DMDP, s::NTuple{2,Float64}, x::Symbol) =
 POMDPs.reward(::Typed2DMDP, s::NTuple{2,Float64}, x::Symbol) =
     x === :stay ? log(s[1]) + s[2] : 0.0
 
+# A continuous-action model whose declared action type cannot hold the
+# Float64 actions the interval path produces
+struct Float32ActionMDP <: POMDPs.MDP{Float64,Float32} end
+POMDPs.actions(::Float32ActionMDP, s) = ActionInterval(0.1, 0.9)
+POMDPs.discount(::Float32ActionMDP) = 0.9
+POMDPs.reward(::Float32ActionMDP, s, x) = log(x)
+POMDPs.transition(::Float32ActionMDP, s, x) = Deterministic(clamp(s, 0.1, 2.0))
+
 # A continuous-action growth model: the feasible set at each state is
 # an ActionInterval with a state-dependent upper bound
 struct GrowthIntervalMDP <: POMDPs.MDP{Float64,Float64}
@@ -171,6 +179,17 @@ POMDPs.transition(m::GrowthIntervalMDP, s, x) =
         policy_q = POMDPs.solve(CollocationSolver(basis), mq; verbose=0)
         @test policy_q.res.cdp.actions isa ContinuousActions{1}
         @test policy_q.res.C == policy.res.C
+        # The action type must accept Float64
+        @test_throws r"action type must accept Float64" POMDPs.solve(
+            CollocationSolver(basis), Float32ActionMDP(); verbose=0)
+        # Refining the evaluation nodes through policy.res refreshes the
+        # policy functor: action() then interpolates the refined policy
+        s_fine = collect(range(s_min, s_max, length=201))
+        set_eval_nodes!(policy.res, s_fine)
+        pf_fresh = ContinuousDPs.PolicyFunction(policy.res)
+        for s in (0.3, 1.0, 1.7)
+            @test POMDPs.action(policy, s) == pf_fresh(s)
+        end
     end
 
     @testset "adapter: requirement checks" begin

@@ -133,7 +133,9 @@ The returned `CollocationPolicy` is a standard `POMDPs.Policy`:
   a discrete policy itself is never interpolated);
 - `value(policy, s)` evaluates the fitted value function;
 - the full `CDPSolveResult` remains available as `policy.res`
-  (residuals, `set_eval_nodes!`, the native `simulate`).
+  (residuals, `set_eval_nodes!`, the native `simulate`); after
+  `set_eval_nodes!(policy.res, ...)`, `action` evaluates the policy on
+  the new evaluation nodes.
 
 `CollocationPolicy` is not thread-safe: for parallel rollouts, use one
 policy instance per thread (the underlying evaluation caches are

@@ -136,7 +136,8 @@ node; `actions(m, s)` must be a subset of `actions(m)` — actions outside
 the global set are not seen by the solver), or as a scalar continuous
 action space declared by `actions(m, s)` returning an
 [`ActionInterval`](@ref) (the inner maximization then uses the
-derivative-free solver); an explicit transition distribution (`SparseCat`,
+derivative-free solver, and the model's action type must accept
+`Float64`); an explicit transition distribution (`SparseCat`,
 `Deterministic`, ... — anything supporting
 `POMDPTools.weighted_iterator`); no terminal states: `isterminal(m, s)`
 must be `false` on the entire basis domain (collocation nodes are
@@ -162,6 +163,10 @@ function POMDPs.solve(solver::CollocationSolver, m::POMDPs.MDP; kwargs...)
     acts1 = POMDPs.actions(m, s1)
     continuous = acts1 isa ActionInterval
     if continuous
+        Float64 <: POMDPs.actiontype(m) || throw(ArgumentError(
+            "a continuous action space is solved and returned as " *
+            "Float64 actions: the model's action type must accept " *
+            "Float64 (got actiontype $(POMDPs.actiontype(m)))"))
         actions = ContinuousActions(
             _IntervalBound{:lo,typeof(m),typeof(to_state)}(m, to_state),
             _IntervalBound{:hi,typeof(m),typeof(to_state)}(m, to_state))
@@ -222,19 +227,41 @@ Policy returned by `POMDPs.solve(solver::CollocationSolver, m)`.
 recomputation for discrete actions, piecewise-linear interpolation
 clamped into the action bounds for continuous ones); `value(policy, s)`
 evaluates the fitted value function. The full `CDPSolveResult` is
-available as `policy.res` (residuals, `set_eval_nodes!`, `simulate`).
+available as `policy.res` (residuals, `set_eval_nodes!`, `simulate`);
+after `set_eval_nodes!(policy.res, ...)`, `action` evaluates the policy
+on the new evaluation nodes.
 
 Not thread-safe: use one policy instance per thread (the underlying
 evaluation caches are single-threaded).
 """
-struct CollocationPolicy{TM,TR,TV,TP} <: POMDPs.Policy
+mutable struct CollocationPolicy{TM,TR,TV,TP,TX,TN} <: POMDPs.Policy
     m::TM
     res::TR
     vf::TV
     pf::TP
+    # The result fields the policy functor was built from: a continuous
+    # policy interpolates `res.X` over `res.eval_nodes_coord`, both of
+    # which `set_eval_nodes!` rebinds
+    pf_X::TX
+    pf_nodes::TN
 end
 
-POMDPs.action(policy::CollocationPolicy, s) = policy.pf(s)
+CollocationPolicy(m, res, vf, pf) =
+    CollocationPolicy(m, res, vf, pf, res.X, res.eval_nodes_coord)
+
+# Rebuild the policy functor if the evaluation nodes changed since it was
+# built (a pointer comparison per call otherwise)
+function _policy_function(policy::CollocationPolicy)
+    res = policy.res
+    if res.X !== policy.pf_X || res.eval_nodes_coord !== policy.pf_nodes
+        policy.pf = PolicyFunction(res)
+        policy.pf_X = res.X
+        policy.pf_nodes = res.eval_nodes_coord
+    end
+    return policy.pf
+end
+
+POMDPs.action(policy::CollocationPolicy, s) = _policy_function(policy)(s)
 POMDPs.value(policy::CollocationPolicy, s) = policy.vf(s)
 
 #= Model export (internal): a ContinuousDP viewed as a POMDPs.MDP =#
@@ -270,14 +297,23 @@ primitives-only `ContinuousDP` does not carry; the state type is
 `Float64` for `statedim == 1` and `NTuple{statedim,Float64}` otherwise.
 `initialstate` may be a state, a number (scalar state), or a POMDPs
 distribution; if omitted, `POMDPs.initialstate` throws an informative
-error. Requires a fixed weights vector (callable weights are not
-supported by model export) and a scalar or discrete action space.
+error. Requires a fixed weights vector forming a probability
+distribution (callable or sub-stochastic weights are not supported by
+model export) and a scalar or discrete action space.
 """
 function as_mdp(cdp::ContinuousDP; initialstate=nothing, statedim::Int=1)
     statedim >= 1 || throw(ArgumentError("statedim must be positive"))
     cdp.weights isa AbstractVector || throw(ArgumentError(
         "as_mdp requires a fixed weights vector (callable weights are " *
         "not supported by model export)"))
+    # A POMDPs distribution needs a proper probability vector: the
+    # sub-stochastic or unnormalized weights the native solver permits
+    # would be read raw by `weighted_iterator` but rescaled by `rand`
+    w = cdp.weights
+    (all(wj -> isfinite(wj) && wj >= 0, w) &&
+     isapprox(sum(w), 1; atol=1e-8)) || throw(ArgumentError(
+        "as_mdp requires the weights to form a probability vector " *
+        "(finite, nonnegative, summing to one)"))
     a = cdp.actions
     a isa ContinuousActions && _action_dim(a) > 1 && throw(ArgumentError(
         "as_mdp supports scalar continuous actions only (the action " *

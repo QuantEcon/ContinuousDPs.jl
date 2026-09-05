@@ -166,9 +166,12 @@ struct ActionInterval
     hi::Float64
 
     function ActionInterval(lo::Real, hi::Real)
-        lo <= hi || throw(ArgumentError(
-            "ActionInterval requires lo <= hi; got [$lo, $hi]"))
-        return new(Float64(lo), Float64(hi))
+        lo_f, hi_f = Float64(lo), Float64(hi)
+        (isfinite(lo_f) && isfinite(hi_f) && lo_f <= hi_f) ||
+            throw(ArgumentError(
+                "ActionInterval requires finite bounds with lo <= hi; " *
+                "got [$lo, $hi]"))
+        return new(lo_f, hi_f)
     end
 end
 
