@@ -37,6 +37,13 @@ POMDPs.transition(::Typed2DMDP, s::NTuple{2,Float64}, x::Symbol) =
 POMDPs.reward(::Typed2DMDP, s::NTuple{2,Float64}, x::Symbol) =
     x === :stay ? log(s[1]) + s[2] : 0.0
 
+# A finite action set that collects into a matrix (a Cartesian product)
+struct ProductActionMDP <: POMDPs.MDP{Float64,Tuple{Int,Int}} end
+POMDPs.actions(::ProductActionMDP) = Iterators.product(1:2, 1:2)
+POMDPs.reward(::ProductActionMDP, s, a) = Float64(a[1] + a[2])
+POMDPs.transition(::ProductActionMDP, s, a) = Deterministic(s)
+POMDPs.discount(::ProductActionMDP) = 0.9
+
 # A continuous-action model whose declared action type cannot hold the
 # Float64 actions the interval path produces
 struct Float32ActionMDP <: POMDPs.MDP{Float64,Float32} end
@@ -113,6 +120,45 @@ POMDPs.transition(m::GrowthIntervalMDP, s, x) =
         )
         policy = POMDPs.solve(CollocationSolver(basis), m; verbose=0)
         @test policy.res.C ≈ res_native.C rtol=1e-8
+    end
+
+    @testset "adapter: zero-probability branches are skipped" begin
+        # The impossible successor 0.0 has reward log(0) = -Inf; the
+        # zero weight must not turn the expectation into NaN
+        basis01 = Basis(ChebParams(5, 0.0, 1.0))
+        m0 = QuickMDP(
+            statetype = Float64,
+            actions = [:stay],
+            discount = 0.9,
+            transition = (s, x) -> SparseCat([0.0, 1.0], [0.0, 1.0]),
+            reward = (s, x, sp) -> log(sp),
+        )
+        ker = PExt._POMDPKernel(m0, identity)
+        fr = PExt._ExpectedReward(m0, ker)
+        @test fr(0.5, :stay) == 0.0
+        # and the solution equals that of the deterministic twin
+        m1 = QuickMDP(
+            statetype = Float64,
+            actions = [:stay],
+            discount = 0.9,
+            transition = (s, x) -> Deterministic(1.0),
+            reward = (s, x, sp) -> log(sp),
+        )
+        policy0 = POMDPs.solve(CollocationSolver(basis01), m0; verbose=0)
+        policy1 = POMDPs.solve(CollocationSolver(basis01), m1; verbose=0)
+        @test policy0.res.converged
+        @test policy0.res.C == policy1.res.C
+        @test POMDPs.value(policy0, 0.5) == 0.0
+    end
+
+    @testset "adapter: finite actions collected from a product" begin
+        basis01 = Basis(ChebParams(5, 0.0, 1.0))
+        policy = POMDPs.solve(CollocationSolver(basis01), ProductActionMDP();
+                              verbose=0)
+        @test policy.res.cdp.actions isa DiscreteActions{Tuple{Int,Int}}
+        @test policy.res.cdp.actions.vals ==
+              vec(collect(Iterators.product(1:2, 1:2)))
+        @test POMDPs.action(policy, 0.5) == (2, 2)
     end
 
     @testset "adapter: simulators run on the policy" begin

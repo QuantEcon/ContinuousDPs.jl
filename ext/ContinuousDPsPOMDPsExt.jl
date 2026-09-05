@@ -58,6 +58,13 @@ end
 # model's explicit transition distribution at each (s, x). States cross
 # the boundary through the `to_state` converter above; the model's next
 # states must be indexable (scalars, tuples, or static vectors).
+#
+# Zero-probability entries of the distribution (e.g. a `SparseCat`
+# listing an impossible successor) are skipped before the payload is
+# evaluated: a model may legitimately error or return a non-finite
+# reward there, and `0 * (-Inf)` would poison the expectation. Only
+# exact zeros are skipped; negative or non-finite weights are model
+# errors and propagate.
 struct _POMDPKernel{TM<:POMDPs.MDP,TC} <: _TransitionKernel
     m::TM
     to_state::TC
@@ -68,6 +75,7 @@ function ContinuousDPs._branch_sum(f::F, ker::_POMDPKernel, s, x,
     ms = ker.to_state(s)
     acc = 0.0
     for (sp, w) in weighted_iterator(POMDPs.transition(ker.m, ms, x))
+        iszero(w) && continue
         acc += f(sp, w, args...)
     end
     return acc
@@ -77,6 +85,7 @@ function ContinuousDPs._foreach_branch(f::F, ker::_POMDPKernel, s, x,
                                        args...) where {F}
     ms = ker.to_state(s)
     for (sp, w) in weighted_iterator(POMDPs.transition(ker.m, ms, x))
+        iszero(w) && continue
         f(sp, w, args...)
     end
     return nothing
@@ -172,8 +181,10 @@ function POMDPs.solve(solver::CollocationSolver, m::POMDPs.MDP; kwargs...)
             _IntervalBound{:hi,typeof(m),typeof(to_state)}(m, to_state))
         a_probe = 0.5 * (minimum(acts1) + maximum(acts1))
     else
+        # `vec`: a finite collection need not collect into a vector
+        # (e.g. `Iterators.product` collects into a matrix)
         acts = try
-            collect(POMDPs.actions(m))
+            vec(collect(POMDPs.actions(m)))
         catch err
             err isa InterruptException && rethrow()
             throw(ArgumentError(

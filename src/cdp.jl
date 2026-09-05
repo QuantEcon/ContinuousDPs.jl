@@ -178,8 +178,12 @@ end
 Base.minimum(itv::ActionInterval) = itv.lo
 Base.maximum(itv::ActionInterval) = itv.hi
 Base.in(x, itv::ActionInterval) = itv.lo <= x <= itv.hi
-Base.rand(rng::AbstractRNG, itv::ActionInterval) =
-    itv.lo + (itv.hi - itv.lo) * rand(rng)
+# Convex combination (the width `hi - lo` may overflow for finite
+# endpoints), clamped against a rounding step past an endpoint
+function Base.rand(rng::AbstractRNG, itv::ActionInterval)
+    u = rand(rng)
+    return clamp((1 - u) * itv.lo + u * itv.hi, itv.lo, itv.hi)
+end
 
 # Element type of the policy-function container for each action space
 _policy_eltype(::ContinuousActions) = Float64

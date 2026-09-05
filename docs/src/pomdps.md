@@ -93,8 +93,10 @@ throws an informative error when a check fails:
 - **Explicit transition distributions.** `transition(m, s, x)` must
   return a distribution with explicitly enumerable support and
   probabilities (`SparseCat`, `Deterministic`, ... --- anything
-  supporting `POMDPTools.weighted_iterator`). Generative-only models are
-  out of scope.
+  supporting `POMDPTools.weighted_iterator`). Zero-probability
+  entries are skipped without evaluating the model there (a
+  `SparseCat` may list impossible successors). Generative-only models
+  are out of scope.
 - **No terminal states** (not supported in this version):
   `isterminal(m, s)` must be `false` on the entire basis domain. The
   collocation nodes are checked at solve time; keeping off-node states

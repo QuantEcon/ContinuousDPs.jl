@@ -60,6 +60,14 @@ using QuantEcon: qnwlogn
         @test_throws ArgumentError ActionInterval(1.0, 0.5)
         @test_throws ArgumentError ActionInterval(-Inf, Inf)
         @test_throws ArgumentError ActionInterval(0.0, NaN)
+        # rand stays inside the interval even when its width overflows
+        itv = ActionInterval(-1e308, 1e308)
+        rng = MersenneTwister(1234)
+        for _ in 1:10
+            x = rand(rng, itv)
+            @test isfinite(x)
+            @test x in itv
+        end
 
         # The state dimension is not defined without a solver
         @test_throws MethodError ndims(cdp)
