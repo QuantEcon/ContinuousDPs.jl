@@ -83,7 +83,7 @@ ALWAYS run these validation steps after making changes:
 │   ├── ContinuousDPsPOMDPsExt.jl    # POMDPs.jl interface (weakdeps: POMDPs, POMDPTools)
 │   └── examples/
 │       ├── cdp_ex_odu_pomdps.jl     # odu belief MDP via the POMDPs.jl interface (two definition styles)
-│       └── cdp_ex_aiyagari_pomdps.jl  # Aiyagari household via the POMDPs.jl interface (continuous assets and savings)
+│       └── cdp_ex_aiyagari_pomdps.jl  # Aiyagari household via the POMDPs.jl interface (continuous assets and savings; two definition styles)
 ├── docs/
 │   ├── make.jl              # Documenter build script
 │   └── src/                 # Documentation source files

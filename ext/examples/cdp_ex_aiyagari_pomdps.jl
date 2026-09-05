@@ -6,15 +6,21 @@
 # method with CONTINUOUS assets and a CONTINUOUS savings choice: the
 # feasible action set at each state is an `ActionInterval`.
 #
-# Requires POMDPs and POMDPTools besides ContinuousDPs and its ecosystem
-# (QuantEcon, BasisMatrices). ContinuousDPs and POMDPs both export
-# `solve` and `simulate`: with both loaded, qualify the calls.
+# The model is defined twice -- as an explicit problem type, then as a
+# QuickMDP -- and the two solutions are cross-checked at the end.
+#
+# Requires POMDPs, POMDPTools, and QuickPOMDPs besides ContinuousDPs and
+# its ecosystem (QuantEcon, BasisMatrices). ContinuousDPs and POMDPs
+# both export `solve` and `simulate`: with both loaded, qualify the
+# calls.
 using ContinuousDPs
 using BasisMatrices: Basis, ChebParams, LinParams
 using QuantEcon: MarkovChain
-using POMDPs, POMDPTools
+using POMDPs, POMDPTools, QuickPOMDPs
 using Random: MersenneTwister
 using Statistics: mean
+
+#= The model as an explicit problem type =#
 
 # Model specification as a subtype of POMDPs.MDP{S,A}
 struct Household{TZ<:MarkovChain,TU} <:
@@ -79,3 +85,30 @@ hist = POMDPs.simulate(HistoryRecorder(max_steps = 100_000,
                        am, policy, (1.0, 1.0))
 K = mean(a for (a, z) in state_hist(hist))
 println("K = ", K)
+
+#= The same model as a QuickMDP =#
+
+function aiyagari_mdp(; r = 0.01, w = 1.0, sigma = 1.0, beta = 0.96,
+                      z_chain = MarkovChain([0.9 0.1; 0.1 0.9], [0.1; 1.0]),
+                      a_min = 1e-10, a_max = 18.0,
+                      u = sigma == 1 ? x -> log(x) :
+                          x -> (x^(1 - sigma) - 1) / (1 - sigma))
+    z_vals = z_chain.state_values
+    P = z_chain.p
+    return QuickMDP(
+        statetype = Tuple{Float64,Float64},
+        actiontype = Float64,
+        actions = ((a, z),) ->
+            ActionInterval(a_min, min(a_max, w * z + (1 + r) * a - 1e-8)),
+        reward = ((a, z), a_new) -> u(w * z + (1 + r) * a - a_new),
+        transition = ((a, z), a_new) ->
+            SparseCat([(a_new, z_new) for z_new in z_vals],
+                      P[findfirst(==(z), z_vals), :]),
+        discount = beta,
+    )
+end
+
+mq = aiyagari_mdp(; a_max = 20.0, r = 0.03, w = 0.956)
+policy_quick = POMDPs.solve(CollocationSolver(basis), mq; verbose=0)
+println("QuickMDP solution identical: ",
+        policy_quick.res.C == policy.res.C)
