@@ -188,10 +188,10 @@ function POMDPs.solve(solver::CollocationSolver, m::POMDPs.MDP; kwargs...)
         catch err
             err isa InterruptException && rethrow()
             throw(ArgumentError(
-                "the collocation solver requires an explicit finite " *
-                "action set: `actions(m)` must return a finite " *
-                "collection, or `actions(m, s)` an `ActionInterval` " *
-                "(collecting it failed with $(sprint(showerror, err)))"))
+                "could not enumerate the action set: `actions(m)` must " *
+                "return a finite collection, unless `actions(m, s)` " *
+                "returns an `ActionInterval` (collecting `actions(m)` " *
+                "failed with $(sprint(showerror, err)))"))
         end
         isempty(acts) && throw(ArgumentError("`actions(m)` is empty"))
         actions = DiscreteActions(acts)

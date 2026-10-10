@@ -20,6 +20,11 @@ POMDPs.transition(::RestrictedMDP, s, x) = Deterministic(clamp(s, 0.1, 2.0))
 POMDPs.reward(::RestrictedMDP, s, x) = 0.0
 POMDPs.isterminal(::RestrictedMDP, s) = false
 
+# An MDP declaring only state-dependent actions (no actions(m)), for the
+# action-enumeration error
+struct NoGlobalActionsMDP <: POMDPs.MDP{Float64,Symbol} end
+POMDPs.actions(::NoGlobalActionsMDP, s) = (:lo, :hi)
+
 # A 2-D MDP whose methods are restricted to the declared state type:
 # solver coordinates must be converted at the package boundary for these
 # methods to dispatch (node-row views would hit MethodErrors, or the
@@ -250,6 +255,8 @@ POMDPs.transition(m::GrowthIntervalMDP, s, x) =
         )
         @test_throws r"terminal states are not supported" POMDPs.solve(
             CollocationSolver(basis), m_term; verbose=0)
+        @test_throws r"could not enumerate the action set" POMDPs.solve(
+            CollocationSolver(basis), NoGlobalActionsMDP(); verbose=0)
     end
 
     @testset "adapter: belief MDP with 2-D state (odu, trimmed)" begin
