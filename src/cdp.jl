@@ -151,6 +151,40 @@ end
 
 Base.length(a::DiscreteActions) = length(a.vals)
 
+"""
+    ActionInterval(lo, hi)
+
+Closed interval `[lo, hi]` of feasible scalar actions at a given state:
+the set-valued counterpart of a one-dimensional `ContinuousActions` at
+one state. Supports `minimum`, `maximum`, `in`, and `rand`. Used at the
+POMDPs.jl interface, where `actions(m, s)` returns the feasible set at a
+state: an `ActionInterval` declares a continuous action space, a finite
+collection a discrete one.
+"""
+struct ActionInterval
+    lo::Float64
+    hi::Float64
+
+    function ActionInterval(lo::Real, hi::Real)
+        lo_f, hi_f = Float64(lo), Float64(hi)
+        (isfinite(lo_f) && isfinite(hi_f) && lo_f <= hi_f) ||
+            throw(ArgumentError(
+                "ActionInterval requires finite bounds with lo <= hi; " *
+                "got [$lo, $hi]"))
+        return new(lo_f, hi_f)
+    end
+end
+
+Base.minimum(itv::ActionInterval) = itv.lo
+Base.maximum(itv::ActionInterval) = itv.hi
+Base.in(x, itv::ActionInterval) = itv.lo <= x <= itv.hi
+# Convex combination (the width `hi - lo` may overflow for finite
+# endpoints), clamped against a rounding step past an endpoint
+function Base.rand(rng::AbstractRNG, itv::ActionInterval)
+    u = rand(rng)
+    return clamp((1 - u) * itv.lo + u * itv.hi, itv.lo, itv.hi)
+end
+
 # Element type of the policy-function container for each action space
 _policy_eltype(::ContinuousActions) = Float64
 _policy_eltype(::DiscreteActions{TA}) where TA = TA
