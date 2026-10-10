@@ -63,7 +63,10 @@ POMDPs.simulate(RolloutSimulator(max_steps=100), m, policy, 1.0)
 
 A finite action set is declared instead by passing the collection as
 `actions` (with `actions(m, s)` optionally restricting it per state);
-the inner maximization is then an exact enumeration.
+the inner maximization is then an exact enumeration. A fuller example,
+the household problem of the Aiyagari model with continuous assets and
+savings, is
+[ext/examples/cdp_ex_aiyagari_pomdps.jl](https://github.com/QuantEcon/ContinuousDPs.jl/blob/main/ext/examples/cdp_ex_aiyagari_pomdps.jl).
 
 !!! note "Wrap model definitions in a build function"
     The build-function pattern above is not cosmetic. `QuickMDP`'s
@@ -86,9 +89,10 @@ throws an informative error when a check fails:
   `transition` and `reward` are never evaluated on infeasible
   state--action pairs --- or `actions(m, s)` returns an
   [`ActionInterval`](@ref)`(lo, hi)`, declaring a continuous scalar
-  action space with state-dependent bounds; the inner maximization then
-  uses the derivative-free (Brent) solver. Multi-dimensional continuous
-  actions are not supported through this interface.
+  action space with state-dependent bounds (the model's action type must
+  accept `Float64`); the inner maximization then uses the
+  derivative-free (Brent) solver. Multi-dimensional continuous actions
+  are not supported through this interface.
 - **Explicit transition distributions.** `transition(m, s, x)` must
   return a distribution with finite support and explicit
   probabilities (`SparseCat`, `Deterministic`, ... --- anything
@@ -145,9 +149,8 @@ single-threaded).
 ## Example: a belief MDP
 
 Finite-observation learning problems reduce to belief MDPs whose
-transition distributions have finite support, as the extension
-requires. The job
-search model with learning about the offer distribution
+transition distributions have finite support, as the extension requires.
+The job search model with learning about the offer distribution
 ([examples/cdp_ex_odu.jl](https://github.com/QuantEcon/ContinuousDPs.jl/blob/main/examples/cdp_ex_odu.jl),
 following [the QuantEcon lecture](https://julia.quantecon.org/dynamic_programming/odu.html))
 solves natively as a `ContinuousDP` with state-dependent callable
