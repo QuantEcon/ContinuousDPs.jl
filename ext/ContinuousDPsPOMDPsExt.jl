@@ -2,10 +2,10 @@
 # POMDPTools are loaded.
 #
 # The headline is MODEL IMPORT: `POMDPs.solve(::CollocationSolver, m)`
-# solves any explicit-finite POMDPs.jl MDP (finite actions, explicit
-# transition distributions, continuous states covered by the solver's
-# basis) by the collocation method, via a transition kernel wrapping the
-# model. Model export (`as_mdp`, wrapping a `ContinuousDP` as a
+# solves a POMDPs.jl MDP (finite actions or a scalar action interval,
+# explicit transition distributions, continuous states covered by the
+# solver's basis) by the collocation method, via a transition kernel
+# wrapping the model. Model export (`as_mdp`, wrapping a `ContinuousDP` as a
 # `POMDPs.MDP`) is internal: it serves as round-trip test infrastructure
 # and its public naming is deferred (the eventual generic belongs to
 # QuantEcon.jl).
@@ -20,7 +20,7 @@ import POMDPs
 using POMDPTools: SparseCat, Deterministic, weighted_iterator
 using Random: AbstractRNG
 
-#= Model import: the collocation solver consumes explicit-finite models =#
+#= Model import: the collocation solver consumes POMDPs.jl models =#
 
 # Solver-to-model state conversion, fixed once at solve time by probing
 # the first collocation node: the core's coordinate points (scalars in
@@ -134,7 +134,7 @@ end
 """
     POMDPs.solve(solver::CollocationSolver, m::POMDPs.MDP; kwargs...)
 
-Solve an explicit-finite POMDPs.jl MDP by the Bellman equation
+Solve a POMDPs.jl MDP by the Bellman equation
 collocation method and return a `CollocationPolicy`.
 
 Requirements on `m` (checked with informative errors where feasible):
@@ -146,8 +146,8 @@ the global set are not seen by the solver), or as a scalar continuous
 action space declared by `actions(m, s)` returning an
 [`ActionInterval`](@ref) (the inner maximization then uses the
 derivative-free solver, and the model's action type must accept
-`Float64`); an explicit transition distribution (`SparseCat`,
-`Deterministic`, ... — anything supporting
+`Float64`); an explicit transition distribution with finite support
+(`SparseCat`, `Deterministic`, ... — anything supporting
 `POMDPTools.weighted_iterator`); no terminal states: `isterminal(m, s)`
 must be `false` on the entire basis domain (collocation nodes are
 checked; off-node states are the model's responsibility); rewards as

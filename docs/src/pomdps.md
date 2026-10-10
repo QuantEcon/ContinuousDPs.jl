@@ -9,11 +9,10 @@ using POMDPs, POMDPTools
 ```
 
 The extension makes `CollocationSolver` available as a solver for
-POMDPs.jl models: `POMDPs.solve(CollocationSolver(basis), m)` solves any
-*explicit-finite* MDP --- continuous states covered by the basis,
-finitely many actions or a scalar action interval, and explicit
-transition distributions --- by the
-Bellman equation collocation method, and returns a standard
+POMDPs.jl models: `POMDPs.solve(CollocationSolver(basis), m)` solves an
+MDP with continuous states covered by the basis, finitely many actions
+or a scalar action interval, and explicit transition distributions by
+the Bellman equation collocation method, and returns a standard
 `POMDPs.Policy`. This gives POMDPs.jl models access to smooth global
 approximation of the value function and the policy over a continuous
 state space, complementing the ecosystem's sampling-based planners.
@@ -91,7 +90,7 @@ throws an informative error when a check fails:
   uses the derivative-free (Brent) solver. Multi-dimensional continuous
   actions are not supported through this interface.
 - **Explicit transition distributions.** `transition(m, s, x)` must
-  return a distribution with explicitly enumerable support and
+  return a distribution with finite support and explicit
   probabilities (`SparseCat`, `Deterministic`, ... --- anything
   supporting `POMDPTools.weighted_iterator`). Zero-probability
   entries are skipped without evaluating the model there (a
@@ -146,7 +145,8 @@ single-threaded).
 ## Example: a belief MDP
 
 Finite-observation learning problems reduce to belief MDPs whose
-transitions are exactly the extension's explicit-finite shape. The job
+transition distributions have finite support, as the extension
+requires. The job
 search model with learning about the offer distribution
 ([examples/cdp_ex_odu.jl](https://github.com/QuantEcon/ContinuousDPs.jl/blob/main/examples/cdp_ex_odu.jl),
 following [the QuantEcon lecture](https://julia.quantecon.org/dynamic_programming/odu.html))
